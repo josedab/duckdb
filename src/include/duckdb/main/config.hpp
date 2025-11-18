@@ -57,6 +57,10 @@ class CompressionInfo;
 class EncryptionUtil;
 class HTTPUtil;
 class DatabaseFilePathManager;
+class MetricsRegistry;
+class PrometheusExporter;
+class OTLPExporter;
+class Tracer;
 
 struct CompressionFunctionSet;
 struct DatabaseCacheEntry;
@@ -279,6 +283,14 @@ public:
 	shared_ptr<DatabaseCacheEntry> db_cache_entry;
 	//! Reference to the database file path manager
 	shared_ptr<DatabaseFilePathManager> path_manager;
+	//! Metrics registry for observability
+	shared_ptr<MetricsRegistry> metrics_registry;
+	//! Prometheus exporter for metrics
+	shared_ptr<PrometheusExporter> prometheus_exporter;
+	//! OTLP exporter for OpenTelemetry
+	shared_ptr<OTLPExporter> otlp_exporter;
+	//! Tracer for distributed tracing
+	shared_ptr<Tracer> tracer;
 
 public:
 	DUCKDB_API static DBConfig &GetConfig(ClientContext &context);

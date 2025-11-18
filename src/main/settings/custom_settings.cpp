@@ -33,6 +33,10 @@
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/logging/log_manager.hpp"
 #include "duckdb/storage/block_allocator.hpp"
+#include "duckdb/common/observability/metrics_registry.hpp"
+#include "duckdb/common/observability/prometheus_exporter.hpp"
+#include "duckdb/common/observability/otlp_exporter.hpp"
+#include "duckdb/common/observability/tracer.hpp"
 
 namespace duckdb {
 
@@ -1585,6 +1589,205 @@ void UsernameSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
 
 Value UsernameSetting::GetSetting(const ClientContext &context) {
 	return Value();
+}
+
+//===----------------------------------------------------------------------===//
+// Enable Metrics Export
+//===----------------------------------------------------------------------===//
+void EnableMetricsExportSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
+	bool enable = input.GetValue<bool>();
+
+	if (db && enable) {
+		// Initialize metrics registry if not already done
+		if (!config.metrics_registry) {
+			config.metrics_registry = make_shared_ptr<MetricsRegistry>();
+			// Register built-in metrics
+			extern void RegisterBuiltinMetrics(MetricsRegistry &registry);
+			RegisterBuiltinMetrics(*config.metrics_registry);
+		}
+
+		// Start Prometheus exporter if not already running
+		if (!config.prometheus_exporter) {
+			int port = 9090; // Default port
+			config.prometheus_exporter = make_shared_ptr<PrometheusExporter>(*config.metrics_registry, port);
+		}
+
+		if (!config.prometheus_exporter->IsRunning()) {
+			config.prometheus_exporter->Start();
+		}
+	} else if (db && !enable) {
+		// Stop Prometheus exporter if running
+		if (config.prometheus_exporter && config.prometheus_exporter->IsRunning()) {
+			config.prometheus_exporter->Stop();
+		}
+	}
+}
+
+void EnableMetricsExportSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
+	if (db && config.prometheus_exporter && config.prometheus_exporter->IsRunning()) {
+		config.prometheus_exporter->Stop();
+	}
+}
+
+Value EnableMetricsExportSetting::GetSetting(const ClientContext &context) {
+	auto &config = DBConfig::GetConfig(context);
+	bool enabled = config.prometheus_exporter && config.prometheus_exporter->IsRunning();
+	return Value::BOOLEAN(enabled);
+}
+
+//===----------------------------------------------------------------------===//
+// Metrics Export Port
+//===----------------------------------------------------------------------===//
+void MetricsExportPortSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
+	int port = input.GetValue<int64_t>();
+
+	if (port < 1 || port > 65535) {
+		throw InvalidInputException("metrics_export_port must be between 1 and 65535");
+	}
+
+	if (db) {
+		// Initialize metrics registry if not already done
+		if (!config.metrics_registry) {
+			config.metrics_registry = make_shared_ptr<MetricsRegistry>();
+			extern void RegisterBuiltinMetrics(MetricsRegistry &registry);
+			RegisterBuiltinMetrics(*config.metrics_registry);
+		}
+
+		// Restart exporter with new port if running
+		bool was_running = config.prometheus_exporter && config.prometheus_exporter->IsRunning();
+		if (was_running) {
+			config.prometheus_exporter->Stop();
+		}
+
+		config.prometheus_exporter = make_shared_ptr<PrometheusExporter>(*config.metrics_registry, port);
+
+		if (was_running) {
+			config.prometheus_exporter->Start();
+		}
+	}
+}
+
+void MetricsExportPortSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
+	// Reset to default port (9090)
+	if (db && config.metrics_registry) {
+		bool was_running = config.prometheus_exporter && config.prometheus_exporter->IsRunning();
+		if (was_running) {
+			config.prometheus_exporter->Stop();
+		}
+
+		config.prometheus_exporter = make_shared_ptr<PrometheusExporter>(*config.metrics_registry, 9090);
+
+		if (was_running) {
+			config.prometheus_exporter->Start();
+		}
+	}
+}
+
+Value MetricsExportPortSetting::GetSetting(const ClientContext &context) {
+	auto &config = DBConfig::GetConfig(context);
+	if (config.prometheus_exporter) {
+		return Value::BIGINT(config.prometheus_exporter->GetPort());
+	}
+	return Value::BIGINT(9090); // Default port
+}
+
+//===----------------------------------------------------------------------===//
+// OTLP Endpoint
+//===----------------------------------------------------------------------===//
+void OtlpEndpointSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
+	string endpoint = input.ToString();
+
+	if (db) {
+		// Initialize metrics registry if not already done
+		if (!config.metrics_registry) {
+			config.metrics_registry = make_shared_ptr<MetricsRegistry>();
+			extern void RegisterBuiltinMetrics(MetricsRegistry &registry);
+			RegisterBuiltinMetrics(*config.metrics_registry);
+		}
+
+		// Create or update OTLP exporter
+		if (!config.otlp_exporter) {
+			config.otlp_exporter = make_shared_ptr<OTLPExporter>(*config.metrics_registry, endpoint);
+		} else {
+			config.otlp_exporter->SetEndpoint(endpoint);
+		}
+	}
+}
+
+void OtlpEndpointSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
+	if (db && config.otlp_exporter) {
+		config.otlp_exporter->SetEndpoint("");
+	}
+}
+
+Value OtlpEndpointSetting::GetSetting(const ClientContext &context) {
+	auto &config = DBConfig::GetConfig(context);
+	if (config.otlp_exporter) {
+		return Value(config.otlp_exporter->GetEndpoint());
+	}
+	return Value("");
+}
+
+//===----------------------------------------------------------------------===//
+// Enable Tracing
+//===----------------------------------------------------------------------===//
+void EnableTracingSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
+	bool enable = input.GetValue<bool>();
+
+	if (db) {
+		// Initialize tracer if not already done
+		if (!config.tracer) {
+			config.tracer = make_shared_ptr<Tracer>();
+		}
+
+		config.tracer->SetEnabled(enable);
+	}
+}
+
+void EnableTracingSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
+	if (db && config.tracer) {
+		config.tracer->SetEnabled(false);
+	}
+}
+
+Value EnableTracingSetting::GetSetting(const ClientContext &context) {
+	auto &config = DBConfig::GetConfig(context);
+	if (config.tracer) {
+		return Value::BOOLEAN(config.tracer->IsEnabled());
+	}
+	return Value::BOOLEAN(false);
+}
+
+//===----------------------------------------------------------------------===//
+// Trace Sample Rate
+//===----------------------------------------------------------------------===//
+void TraceSampleRateSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
+	double rate = input.GetValue<double>();
+
+	if (rate < 0.0 || rate > 1.0) {
+		throw InvalidInputException("trace_sample_rate must be between 0.0 and 1.0");
+	}
+
+	if (db) {
+		// Initialize tracer if not already done
+		if (!config.tracer) {
+			config.tracer = make_shared_ptr<Tracer>();
+		}
+
+		config.tracer->SetSampleRate(rate);
+	}
+}
+
+void TraceSampleRateSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
+	if (db && config.tracer) {
+		config.tracer->SetSampleRate(1.0); // Default: sample everything
+	}
+}
+
+Value TraceSampleRateSetting::GetSetting(const ClientContext &context) {
+	auto &config = DBConfig::GetConfig(context);
+	// Return default value since we don't store sample rate separately
+	return Value::DOUBLE(1.0);
 }
 
 } // namespace duckdb

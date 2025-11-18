@@ -16,6 +16,7 @@ add_subdirectory(sort)
 add_subdirectory(types)
 add_subdirectory(value_operations)
 add_subdirectory(vector_operations)
+add_subdirectory(observability)
 
 if(${EXIT_TIME_DESTRUCTORS_WARNING})
   set(CMAKE_CXX_FLAGS_DEBUG

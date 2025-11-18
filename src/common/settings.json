@@ -453,6 +453,41 @@
         "custom_implementation": true
     },
     {
+        "name": "enable_metrics_export",
+        "description": "Enables Prometheus metrics export via HTTP endpoint",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "custom_implementation": true
+    },
+    {
+        "name": "metrics_export_port",
+        "description": "Port for the Prometheus metrics HTTP endpoint",
+        "type": "BIGINT",
+        "scope": "global",
+        "custom_implementation": true
+    },
+    {
+        "name": "otlp_endpoint",
+        "description": "Endpoint URL for OpenTelemetry metrics export",
+        "type": "VARCHAR",
+        "scope": "global",
+        "custom_implementation": true
+    },
+    {
+        "name": "enable_tracing",
+        "description": "Enables distributed tracing for queries",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "custom_implementation": true
+    },
+    {
+        "name": "trace_sample_rate",
+        "description": "Sampling rate for distributed tracing (0.0 to 1.0)",
+        "type": "DOUBLE",
+        "scope": "global",
+        "custom_implementation": true
+    },
+    {
         "name": "enable_progress_bar",
         "description": "Enables the progress bar, printing progress to the terminal for long queries",
         "type": "BOOLEAN",
