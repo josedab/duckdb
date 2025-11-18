@@ -5,6 +5,7 @@ add_library_unity(
   test_checksum.cpp
   test_file_system.cpp
   test_hyperlog.cpp
+  test_memory_manager.cpp
   test_numeric_cast.cpp
   test_parse_logical_type.cpp
   test_utf.cpp

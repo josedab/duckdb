@@ -1,6 +1,7 @@
 #include "duckdb/main/database.hpp"
 
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/common/memory_manager.hpp"
 #include "duckdb/common/virtual_file_system.hpp"
 #include "duckdb/execution/index/index_type_set.hpp"
 #include "duckdb/execution/operator/helper/physical_set.hpp"
@@ -90,6 +91,7 @@ DatabaseInstance::~DatabaseInstance() {
 
 	external_file_cache.reset();
 	result_set_manager.reset();
+	unified_memory_manager.reset();
 
 	buffer_manager.reset();
 
@@ -286,6 +288,9 @@ void DatabaseInstance::Initialize(const char *database_path, DBConfig *user_conf
 
 	log_manager = make_uniq<LogManager>(*this, LogConfig());
 	log_manager->Initialize();
+
+	// Initialize unified memory manager with the same limit as the buffer pool
+	unified_memory_manager = make_uniq<UnifiedMemoryManager>(config.options.maximum_memory);
 
 	external_file_cache = make_uniq<ExternalFileCache>(*this, config.options.enable_external_file_cache);
 	result_set_manager = make_uniq<ResultSetManager>(*this);
@@ -539,6 +544,10 @@ const duckdb_ext_api_v1 DatabaseInstance::GetExtensionAPIV1() {
 
 LogManager &DatabaseInstance::GetLogManager() const {
 	return *log_manager;
+}
+
+UnifiedMemoryManager &DatabaseInstance::GetUnifiedMemoryManager() {
+	return *unified_memory_manager;
 }
 
 ValidChecker &ValidChecker::Get(DatabaseInstance &db) {
