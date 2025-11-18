@@ -1,0 +1,403 @@
+================================================================================
+                    DUCKDB PERFORMANCE ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           QUERY EXECUTION FLOW                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                    SQL Query String
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │   Parser     │  Produces Abstract Syntax Tree
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │   Binder     │  Type checking, column binding
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │   Logical    │  Creates LogicalPlan (unoptimized)
+                    │   Planner    │
+                    └──────┬───────┘
+                           │
+                           ▼
+        ╔══════════════════════════════════════╗
+        ║      OPTIMIZER (12+ Passes)          ║
+        ║  1. Filter Pushdown                  ║
+        ║  2. Late Materialization             ║
+        ║  3. Column Lifetime Analysis         ║
+        ║  4. Compressed Materialization       ║
+        ║  5. Common Subplan Optimization      ║
+        ║  6. Expression Heuristics            ║
+        ║  7. CSE Optimization                 ║
+        ║  8. Filter Combination               ║
+        ║  9. Join Elimination                 ║
+        ║  10. CTE Inlining                    ║
+        ║  11. Join Order Optimization         ║
+        ║  12. Index Utilization               ║
+        ╚══════════════════════════════════════╝
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │   Physical   │  Operator selection, cost-based
+                    │   Planner    │
+                    └──────┬───────┘
+                           │
+                           ▼
+        ┌────────────────────────────────────────┐
+        │   Pipeline Construction + Scheduling   │
+        │   - Break into independent pipelines   │
+        │   - Create dependency DAG              │
+        │   - Assign tasks to thread pool        │
+        └────────┬───────────────────────────────┘
+                 │
+        ┌────────▼──────────────────────────────┐
+        │   Executor (coordinates pipelines)    │
+        │   Work-stealing scheduler             │
+        │   - Dynamic load balancing            │
+        │   - Error handling/cancellation       │
+        └────────┬──────────────────────────────┘
+                 │
+       ┌─────────┴──────────┬──────────┬──────────┐
+       │                    │          │          │
+       ▼                    ▼          ▼          ▼
+   PipelineTask         PipelineTask Pipeline   Pipeline
+   [Thread 0]           [Thread 1]   Task...    Task...
+       │                    │          │          │
+       └────────────────────┴──────────┴──────────┘
+                           │
+                           ▼ (Parallel execution)
+        ┌────────────────────────────────────────┐
+        │   Pipeline Executor (per-thread)       │
+        │   - Source: GetData() → DataChunk      │
+        │   - Operators: Transform chunks        │
+        │   - Sink: Aggregate/Collect result    │
+        └────────┬───────────────────────────────┘
+                 │ 2048-element batches
+                 ▼
+        ┌────────────────────────────────────────┐
+        │   ExpressionExecutor (vectorized)      │
+        │   - Evaluates all 2048 rows at once    │
+        │   - SIMD-friendly memory layout        │
+        │   - Works with compressed data         │
+        └────────┬───────────────────────────────┘
+                 │
+                 ▼
+            Results
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      DATA REPRESENTATION LAYERS                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+USER APPLICATION
+      │
+      ▼
+QUERY RESULT (rows/columns)
+      │
+      ▼
+┌──────────────────────────────────────┐
+│   DataChunk (2048 rows × N columns)  │  ◄─── Vectorized Execution Unit
+│                                      │
+│  ┌──────────────────────────────┐   │
+│  │ Vector<Column A> (2048 vals) │   │
+│  ├──────────────────────────────┤   │
+│  │ Vector<Column B> (2048 vals) │   │
+│  ├──────────────────────────────┤   │
+│  │ Vector<Column C> (2048 vals) │   │
+│  └──────────────────────────────┘   │
+└──────────────────────────────────────┘
+      │
+      ▼
+┌──────────────────────────────────────┐
+│   Vector Representations             │  ◄─── 4 Types
+│                                      │
+│  FLAT_VECTOR:    [val0][val1]...[v]  │  Standard dense array
+│  CONSTANT_VECTOR: [V, V, V, V, V, V] │  Single repeated value
+│  DICTIONARY_VECTOR: [i0][i1][i2]...  │  Indices into dictionary
+│                     ↓  ↓  ↓           │
+│                   [val][val][val]     │
+│  SEQUENCE_VECTOR: START, INCR, COUNT  │  Computed sequence
+│                                      │
+└──────────────────────────────────────┘
+      │
+      ▼
+┌──────────────────────────────────────┐
+│   Selection Vector (optional)        │  ◄─── Zero-Copy Filtering
+│   [idx0][idx1][idx2]... (count)      │
+│   Points to valid rows only          │
+│   Applied through all operations     │
+└──────────────────────────────────────┘
+      │
+      ▼
+DISK STORAGE (Column-Oriented)
+      │
+      ▼
+┌─────────────────────────────────────────┐
+│   DataTable (logical table)             │
+│                                         │
+│   ┌─────────────────────────────────┐  │
+│   │ RowGroup 0 (65K rows)           │  │  ┌─── Row Group
+│   │                                 │  │  │
+│   │ ┌──────────┐ ┌──────────┐       │  │  │    ~65K rows per group
+│   │ │ Column A │ │ Column B │  ... │  │  │    Multiple column segments
+│   │ │ Segment0 │ │ Segment0 │      │  │  │
+│   │ │Compress: │ │Compress: │      │  │  │
+│   │ │Bitpack   │ │Dictionary│      │  │  │
+│   │ │64KB,RLE  │ │+FSST,48KB│      │  │  │
+│   │ └──────────┘ └──────────┘      │  │  │
+│   │                                 │  │  │
+│   │ ┌──────────┐ ┌──────────┐       │  │  │
+│   │ │ Segment1 │ │ Segment1 │      │  │  │
+│   │ │Compress: │ │Compress: │      │  │  │
+│   │ │Zstd 56KB │ │RLE 12KB  │      │  │  │
+│   │ └──────────┘ └──────────┘      │  │  │
+│   │                                 │  │  │
+│   │ Statistics:                     │  │  │
+│   │  Col A: min=10, max=99999       │  │  │
+│   │  Col B: min='aaa', max='zzz'    │  │  │
+│   └─────────────────────────────────┘  │  └─── Segment (64KB chunks)
+│   ┌─────────────────────────────────┐  │
+│   │ RowGroup 1 (65K rows)           │  │
+│   │ ... (same structure)            │  │
+│   └─────────────────────────────────┘  │
+│                                         │
+└─────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     VECTORIZATION BENEFITS PYRAMID                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                          Overall Performance
+                         (5-50x improvement)
+                                ╱╲
+                               ╱  ╲
+                         SIMD Integration
+                        (vector instructions,
+                         auto-vectorization)
+                         /              \
+                        ╱                ╲
+                    Amortization of Overhead
+                   (function calls, iterations,
+                    branches amortized across 2048)
+                    /                         \
+                   ╱                           ╲
+              Memory Efficiency           Cache Optimization
+           (contiguous layout,            (~16-64KB per vector,
+            reduced indirection)          L1/L2 cache resident)
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   COMPRESSION LAYER (14+ Algorithms)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Data Characteristics        Recommended Compression       Typical Ratio
+────────────────────────────────────────────────────────────────────────
+Repetitive values           RLE                           10-100x
+Categorical (low-card)      Dictionary + FSST             2-10x
+Numeric ranges              Bitpacking, ALP               3-8x
+Strings                     Dictionary + FSST             2-5x
+Time-series numbers         Chimp, ALPRD                  2-6x
+All-same value              Numeric Constant              1000x
+No NULLs + small type       Empty Validity               ~10%
+General-purpose             Zstd                          2-4x
+BitMaps                     Roaring                       Variable
+
+Lazy Decompression: Data decompressed on-demand during filtering
+                    Compressed data used directly in predicates
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      PARALLEL EXECUTION MODEL                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+        Physical Plan (PhysicalOperator tree)
+                    │
+                    ▼
+        ╔═════════════════════════════╗
+        ║ Pipeline Construction       ║
+        ║ - Identify sources          ║
+        ║ - Chain operators           ║
+        ║ - Mark sinks                ║
+        ║ - Build dependency DAG      ║
+        ╚═════════────────────────────╝
+                    │
+        ┌───────────┼────────────┬─────────────┐
+        │           │            │             │
+        ▼           ▼            ▼             ▼
+    Pipeline0   Pipeline1    Pipeline2    Pipeline3
+    Source:Scan Depend on:  Depend on:   Depend on:
+    Operators:  P0          P0,P1        P2
+    Sink:Hash
+    Build
+        │           │            │             │
+        └───────────┼────────────┴─────────────┘
+                    │ (DAG execution: run P0,P1,P2 before P3)
+                    ▼
+        ┌──────────────────────────────┐
+        │   Executor + Task Scheduler  │
+        │                              │
+        │  Thread 0 ──┐  Thread 1 ──┐  │
+        │  Pipeline0  │  Pipeline0  │  │  Work-Stealing Queue
+        │  [chunks:   │  [chunks:   │  │  Dynamic Load Balancing
+        │   1-25K]    │   25-50K]   │  │
+        │             │             │  │
+        │  ┌─────┐    │  ┌─────┐    │  │  Each task processes 50
+        │  │     │    │  │     │    │  │  DataChunks before checking
+        │  │Task0│    │  │Task1│    │  │  for work
+        │  │     │    │  │     │    │  │
+        │  └─────┘    │  └─────┘    │  │
+        └──────────────────────────────┘
+                    │
+                    ▼ (Parallel per-thread)
+        ┌──────────────────────────────┐
+        │   PipelineExecutor (thread)  │
+        │                              │
+        │ REPEAT 50 times:             │
+        │  1. source.GetData()         │
+        │     → DataChunk[2048]        │
+        │  2. For each operator:       │
+        │     op.Execute(chunk)        │
+        │     → modified chunk         │
+        │  3. sink.Sink(chunk)         │
+        │     → add to local state     │
+        │                              │
+        │ Then check queue for more    │
+        └──────────────────────────────┘
+                    │
+                    ▼ (Final step)
+        ┌──────────────────────────────┐
+        │   Sink.Finalize()            │
+        │   Combine all thread results │
+        │   Return final output        │
+        └──────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MEMORY MANAGEMENT HIERARCHY                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Application Code
+      │
+      ▼
+    Allocator (pluggable interface)
+      │
+      ├──→ DefaultAllocator (malloc/free)
+      │       For small, temporary allocations
+      │
+      └──→ BufferAllocator (routes through BufferManager)
+              For large allocations that need:
+              - Memory awareness
+              - Eviction capability
+              - Per-query limits
+              │
+              ▼
+        BufferManager
+        ├─ Maintains block handles
+        ├─ Pins/unpins for eviction control
+        ├─ LRU eviction queue
+        ├─ Memory pressure feedback
+        │
+        ├─→ In-Memory Storage
+        │   (hot data, pinned)
+        │
+        └─→ Temporary Files (disk)
+            (cold data, evicted)
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         JOIN OPTIMIZATION                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Input: TableA JOIN TableB
+
+Physical Plan Decision Tree:
+    │
+    ├─ If tables small? ─→ Nested Loop Join
+    │   (no build phase, simple iteration)
+    │
+    ├─ If data pre-sorted? ─→ Merge Join
+    │   (O(n+m), minimal memory)
+    │
+    └─ Default ─→ Hash Join (primary)
+        │
+        ├─ BUILD phase (parallel):
+        │   Each thread builds local hashtable
+        │   on TableB's join columns
+        │   │
+        │   └─ Storage:
+        │       [SERIALIZED ROW][NEXT PTR]
+        │       [SERIALIZED ROW][NEXT PTR]  ← Chained data
+        │       ...
+        │       [PTR][PTR][PTR]...          ← Hash table (linear probe)
+        │
+        ├─ MERGE local hashtables
+        │
+        ├─ BUILD pointer table
+        │   (allocate hash slots)
+        │
+        └─ PROBE phase (parallel):
+            Scan TableA, look up in hash table
+            Return matching pairs from TableB
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    QUERY OPTIMIZATION FLOW                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+            Logical Plan
+                 │
+    ┌────────────▼───────────────┐
+    │ Filter Pushdown            │  Move predicates toward data sources
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Late Materialization       │  Delay column widening
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Column Lifetime Analysis   │  Drop unused columns early
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Compressed Materialization │  Keep data compressed
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Common Subplan Opt         │  Materialize shared once
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Expression Heuristics      │  Cheap filters first
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ CSE Optimization           │  Eliminate redundant expr
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Filter Combination         │  Merge predicates
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Join Elimination           │  Remove unnecessary joins
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ CTE Inlining               │  Inline materialization
+    └────────────┬───────────────┘
+                 │
+    ┌────────────▼───────────────┐
+    │ Join Order Optimization    │  Optimal join sequence
+    └────────────┬───────────────┘
+                 │
+            Optimized Logical Plan
+                 │
+                 ▼
+            Physical Plan
+
