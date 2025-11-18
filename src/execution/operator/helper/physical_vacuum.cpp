@@ -3,6 +3,7 @@
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/storage/data_table.hpp"
 #include "duckdb/storage/statistics/distinct_statistics.hpp"
+#include "duckdb/storage/statistics/histogram_collector.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
 namespace duckdb {
@@ -24,10 +25,17 @@ public:
 			} else {
 				column_distinct_stats.push_back(nullptr);
 			}
+			// Initialize histogram collector for supported types
+			if (HistogramCollector::TypeIsSupported(column.GetType())) {
+				column_histogram_collectors.push_back(make_uniq<HistogramCollector>(column.GetType()));
+			} else {
+				column_histogram_collectors.push_back(nullptr);
+			}
 		}
 	};
 
 	vector<unique_ptr<DistinctStatistics>> column_distinct_stats;
+	vector<unique_ptr<HistogramCollector>> column_histogram_collectors;
 	Vector hashes;
 };
 
@@ -45,11 +53,18 @@ public:
 			} else {
 				column_distinct_stats.push_back(nullptr);
 			}
+			// Initialize histogram collector for supported types
+			if (HistogramCollector::TypeIsSupported(column.GetType())) {
+				column_histogram_collectors.push_back(make_uniq<HistogramCollector>(column.GetType()));
+			} else {
+				column_histogram_collectors.push_back(nullptr);
+			}
 		}
 	};
 
 	mutex stats_lock;
 	vector<unique_ptr<DistinctStatistics>> column_distinct_stats;
+	vector<unique_ptr<HistogramCollector>> column_histogram_collectors;
 };
 
 unique_ptr<GlobalSinkState> PhysicalVacuum::GetGlobalSinkState(ClientContext &context) const {
@@ -61,10 +76,14 @@ SinkResultType PhysicalVacuum::Sink(ExecutionContext &context, DataChunk &chunk,
 	D_ASSERT(lstate.column_distinct_stats.size() == column_id_map.size());
 
 	for (idx_t col_idx = 0; col_idx < chunk.data.size(); col_idx++) {
-		if (!DistinctStatistics::TypeIsSupported(chunk.data[col_idx].GetType())) {
-			continue;
+		// Update distinct statistics
+		if (DistinctStatistics::TypeIsSupported(chunk.data[col_idx].GetType())) {
+			lstate.column_distinct_stats[col_idx]->Update(chunk.data[col_idx], chunk.size(), lstate.hashes);
 		}
-		lstate.column_distinct_stats[col_idx]->Update(chunk.data[col_idx], chunk.size(), lstate.hashes);
+		// Update histogram collector
+		if (lstate.column_histogram_collectors[col_idx]) {
+			lstate.column_histogram_collectors[col_idx]->AddValues(chunk.data[col_idx], chunk.size());
+		}
 	}
 
 	return SinkResultType::NEED_MORE_INPUT;
@@ -78,9 +97,14 @@ SinkCombineResultType PhysicalVacuum::Combine(ExecutionContext &context, Operato
 	D_ASSERT(g_state.column_distinct_stats.size() == l_state.column_distinct_stats.size());
 
 	for (idx_t col_idx = 0; col_idx < g_state.column_distinct_stats.size(); col_idx++) {
+		// Merge distinct statistics
 		if (g_state.column_distinct_stats[col_idx]) {
 			D_ASSERT(l_state.column_distinct_stats[col_idx]);
 			g_state.column_distinct_stats[col_idx]->Merge(*l_state.column_distinct_stats[col_idx]);
+		}
+		// Merge histogram collectors
+		if (g_state.column_histogram_collectors[col_idx] && l_state.column_histogram_collectors[col_idx]) {
+			g_state.column_histogram_collectors[col_idx]->Merge(*l_state.column_histogram_collectors[col_idx]);
 		}
 	}
 
@@ -96,7 +120,16 @@ SinkFinalizeType PhysicalVacuum::Finalize(Pipeline &pipeline, Event &event, Clie
 
 	auto tbl = table;
 	for (idx_t col_idx = 0; col_idx < sink.column_distinct_stats.size(); col_idx++) {
+		// Set distinct statistics
 		tbl->GetStorage().SetDistinct(column_id_map.at(col_idx), std::move(sink.column_distinct_stats[col_idx]));
+
+		// Build and set histogram
+		if (sink.column_histogram_collectors[col_idx]) {
+			auto histogram = sink.column_histogram_collectors[col_idx]->Build();
+			if (histogram) {
+				tbl->GetStorage().SetHistogram(column_id_map.at(col_idx), std::move(histogram));
+			}
+		}
 	}
 	if (tbl) {
 		tbl->GetStorage().VacuumIndexes();

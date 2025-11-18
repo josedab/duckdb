@@ -219,8 +219,10 @@ public:
 
 	//! Get table sample
 	unique_ptr<BlockingSample> GetSample();
-	//! Sets statistics of a physical column within the table
+	//! Sets distinct statistics of a physical column within the table
 	void SetDistinct(column_t column_id, unique_ptr<DistinctStatistics> distinct_stats);
+	//! Sets histogram of a physical column within the table
+	void SetHistogram(column_t column_id, unique_ptr<EquiHeightHistogram> histogram);
 
 	//! Obtains a shared lock to prevent checkpointing while operations are running
 	unique_ptr<StorageLockKey> GetSharedCheckpointLock();

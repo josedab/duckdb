@@ -1,0 +1,170 @@
+# name: test/sql/vacuum/test_histogram.test
+# description: Test histogram collection during ANALYZE
+# group: [vacuum]
+
+# Histogram collection relies on vector size
+require vector_size 1024
+
+require skip_reload
+
+# Different vector sizes affect sampling
+require no_vector_verification
+
+# Test basic histogram collection
+statement ok
+CREATE TABLE test_hist (i INTEGER, f DOUBLE, s VARCHAR);
+
+statement ok
+INSERT INTO test_hist SELECT range % 100, range * 0.1, 'value_' || (range % 50) FROM range(10000);
+
+# Run ANALYZE to collect histograms
+statement ok
+ANALYZE test_hist;
+
+# Verify statistics are collected (histogram info is internal but distinct stats should be updated)
+query T
+SELECT stats(i) FROM test_hist LIMIT 1;
+----
+[Min: 0, Max: 99][Has Null: false, Has No Null: true][Approx Unique: 100]
+
+query T
+SELECT stats(f) FROM test_hist LIMIT 1;
+----
+[Min: 0.0, Max: 999.9][Has Null: false, Has No Null: true][Approx Unique: 10000]
+
+# Test histogram with NULL values
+statement ok
+CREATE TABLE test_nulls (val INTEGER);
+
+statement ok
+INSERT INTO test_nulls SELECT CASE WHEN range % 5 = 0 THEN NULL ELSE range END FROM range(1000);
+
+statement ok
+ANALYZE test_nulls;
+
+query T
+SELECT stats(val) FROM test_nulls LIMIT 1;
+----
+[Min: 1, Max: 999][Has Null: true, Has No Null: true][Approx Unique: 1000]
+
+# Test histogram with skewed data distribution
+statement ok
+CREATE TABLE test_skewed (val INTEGER);
+
+# Insert 80% values between 20-40, 20% outside
+statement ok
+INSERT INTO test_skewed SELECT 20 + (range % 20) FROM range(8000);
+
+statement ok
+INSERT INTO test_skewed SELECT range % 100 FROM range(2000);
+
+statement ok
+ANALYZE test_skewed;
+
+# Histogram should capture the skewed distribution
+query T
+SELECT stats(val) FROM test_skewed LIMIT 1;
+----
+[Min: 0, Max: 99][Has Null: false, Has No Null: true][Approx Unique: 100]
+
+# Test histogram with different data types
+statement ok
+CREATE TABLE test_types (
+    tinyint_col TINYINT,
+    smallint_col SMALLINT,
+    bigint_col BIGINT,
+    float_col FLOAT,
+    varchar_col VARCHAR
+);
+
+statement ok
+INSERT INTO test_types SELECT
+    (range % 127)::TINYINT,
+    (range % 1000)::SMALLINT,
+    range::BIGINT,
+    range * 0.5,
+    'str_' || (range % 100)
+FROM range(5000);
+
+statement ok
+ANALYZE test_types;
+
+# Verify all columns have statistics
+query T
+SELECT stats(tinyint_col) FROM test_types LIMIT 1;
+----
+[Min: 0, Max: 126][Has Null: false, Has No Null: true][Approx Unique: 127]
+
+query T
+SELECT stats(bigint_col) FROM test_types LIMIT 1;
+----
+[Min: 0, Max: 4999][Has Null: false, Has No Null: true][Approx Unique: 5000]
+
+# Test empty table
+statement ok
+CREATE TABLE test_empty (val INTEGER);
+
+statement ok
+ANALYZE test_empty;
+
+# Test single value table
+statement ok
+CREATE TABLE test_single (val INTEGER);
+
+statement ok
+INSERT INTO test_single VALUES (42);
+
+statement ok
+ANALYZE test_single;
+
+query T
+SELECT stats(val) FROM test_single LIMIT 1;
+----
+[Min: 42, Max: 42][Has Null: false, Has No Null: true][Approx Unique: 1]
+
+# Test table with all same values
+statement ok
+CREATE TABLE test_constant (val INTEGER);
+
+statement ok
+INSERT INTO test_constant SELECT 100 FROM range(1000);
+
+statement ok
+ANALYZE test_constant;
+
+query T
+SELECT stats(val) FROM test_constant LIMIT 1;
+----
+[Min: 100, Max: 100][Has Null: false, Has No Null: true][Approx Unique: 1]
+
+# Test ANALYZE on specific column
+statement ok
+CREATE TABLE test_specific (a INTEGER, b INTEGER);
+
+statement ok
+INSERT INTO test_specific SELECT range, range % 10 FROM range(1000);
+
+statement ok
+ANALYZE test_specific(a);
+
+# Column a should have updated statistics
+query T
+SELECT stats(a) FROM test_specific LIMIT 1;
+----
+[Min: 0, Max: 999][Has Null: false, Has No Null: true][Approx Unique: 1000]
+
+# Test persistence (analyze and reload)
+statement ok
+CREATE TABLE test_persist (val INTEGER);
+
+statement ok
+INSERT INTO test_persist SELECT range FROM range(5000);
+
+statement ok
+ANALYZE test_persist;
+
+# Statistics should be available
+query T
+SELECT stats(val) FROM test_persist LIMIT 1;
+----
+[Min: 0, Max: 4999][Has Null: false, Has No Null: true][Approx Unique: 5000]

@@ -1574,4 +1574,10 @@ void RowGroupCollection::SetDistinct(column_t column_id, unique_ptr<DistinctStat
 	stats.GetStats(*stats_lock, column_id).SetDistinct(std::move(distinct_stats));
 }
 
+void RowGroupCollection::SetHistogram(column_t column_id, unique_ptr<EquiHeightHistogram> histogram) {
+	D_ASSERT(column_id != COLUMN_IDENTIFIER_ROW_ID);
+	auto stats_lock = stats.GetLock();
+	stats.GetStats(*stats_lock, column_id).SetHistogram(std::move(histogram));
+}
+
 } // namespace duckdb

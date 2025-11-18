@@ -10,6 +10,7 @@
 
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/storage/statistics/distinct_statistics.hpp"
+#include "duckdb/storage/statistics/histogram.hpp"
 
 namespace duckdb {
 class Serializer;
@@ -18,6 +19,8 @@ class ColumnStatistics {
 public:
 	explicit ColumnStatistics(BaseStatistics stats_p);
 	ColumnStatistics(BaseStatistics stats_p, unique_ptr<DistinctStatistics> distinct_stats_p);
+	ColumnStatistics(BaseStatistics stats_p, unique_ptr<DistinctStatistics> distinct_stats_p,
+	                 unique_ptr<EquiHeightHistogram> histogram_p);
 
 public:
 	static shared_ptr<ColumnStatistics> CreateEmptyStats(const LogicalType &type);
@@ -32,6 +35,13 @@ public:
 	DistinctStatistics &DistinctStats();
 	void SetDistinct(unique_ptr<DistinctStatistics> distinct_stats);
 
+	bool HasHistogram();
+	EquiHeightHistogram &Histogram();
+	void SetHistogram(unique_ptr<EquiHeightHistogram> histogram);
+
+	//! Estimate selectivity using histogram if available
+	double EstimateSelectivity(ExpressionType op, const Value &constant);
+
 	shared_ptr<ColumnStatistics> Copy() const;
 
 	void Serialize(Serializer &serializer) const;
@@ -41,6 +51,8 @@ private:
 	BaseStatistics stats;
 	//! The approximate count distinct stats of the column
 	unique_ptr<DistinctStatistics> distinct_stats;
+	//! The equi-height histogram for selectivity estimation
+	unique_ptr<EquiHeightHistogram> histogram;
 };
 
 } // namespace duckdb

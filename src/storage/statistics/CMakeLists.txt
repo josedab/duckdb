@@ -4,6 +4,8 @@ add_library_unity(
   base_statistics.cpp
   column_statistics.cpp
   distinct_statistics.cpp
+  histogram.cpp
+  histogram_collector.cpp
   array_stats.cpp
   list_stats.cpp
   numeric_stats.cpp

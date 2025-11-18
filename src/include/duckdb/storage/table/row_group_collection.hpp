@@ -133,6 +133,7 @@ public:
 	unique_ptr<BaseStatistics> CopyStats(column_t column_id);
 	unique_ptr<BlockingSample> GetSample();
 	void SetDistinct(column_t column_id, unique_ptr<DistinctStatistics> distinct_stats);
+	void SetHistogram(column_t column_id, unique_ptr<EquiHeightHistogram> histogram);
 
 	AttachedDatabase &GetAttached();
 	BlockManager &GetBlockManager() {

@@ -1583,6 +1583,11 @@ void DataTable::SetDistinct(column_t column_id, unique_ptr<DistinctStatistics> d
 	row_groups->SetDistinct(column_id, std::move(distinct_stats));
 }
 
+void DataTable::SetHistogram(column_t column_id, unique_ptr<EquiHeightHistogram> histogram) {
+	D_ASSERT(column_id != COLUMN_IDENTIFIER_ROW_ID);
+	row_groups->SetHistogram(column_id, std::move(histogram));
+}
+
 unique_ptr<BlockingSample> DataTable::GetSample() {
 	return row_groups->GetSample();
 }
