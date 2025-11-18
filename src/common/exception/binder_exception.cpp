@@ -1,6 +1,7 @@
 #include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/function.hpp"
+#include "duckdb/parser/hint_generator.hpp"
 
 namespace duckdb {
 
@@ -59,4 +60,42 @@ BinderException BinderException::Unsupported(ParsedExpression &expr, const strin
 	auto extra_info = Exception::InitializeExtraInfo("UNSUPPORTED", expr.GetQueryLocation());
 	return BinderException(extra_info, message);
 }
+
+BinderException BinderException::TableNotFound(const string &name, const vector<string> &similar_tables,
+                                               QueryErrorContext context) {
+	auto extra_info = Exception::InitializeExtraInfo("TABLE_NOT_FOUND", context.query_location);
+	extra_info["name"] = name;
+
+	string message;
+	if (similar_tables.empty()) {
+		message = StringUtil::Format("Table \"%s\" does not exist", name);
+	} else {
+		// Get best matches using fuzzy matching
+		auto suggestions = HintGenerator::GetSuggestions(name, similar_tables);
+		string hint = HintGenerator::FormatIdentifierHint(suggestions);
+
+		extra_info["candidates"] = StringUtil::Join(suggestions, ",");
+
+		message = StringUtil::Format("Table \"%s\" does not exist!\n%s", name, hint);
+	}
+
+	return BinderException(extra_info, message);
+}
+
+BinderException BinderException::AmbiguousReference(const string &name, const vector<string> &tables,
+                                                    QueryErrorContext context) {
+	auto extra_info = Exception::InitializeExtraInfo("AMBIGUOUS_REFERENCE", context.query_location);
+	extra_info["name"] = name;
+
+	string table_list = StringUtil::Join(tables, ", ");
+	extra_info["tables"] = table_list;
+
+	string message = StringUtil::Format(
+	    "Ambiguous reference to column \"%s\". Column is present in multiple tables: %s. "
+	    "Qualify the column with a table name to resolve the ambiguity.",
+	    name, table_list);
+
+	return BinderException(extra_info, message);
+}
+
 } // namespace duckdb

@@ -1,0 +1,154 @@
+# name: test/sql/error/enhanced_error_context.test
+# description: Test enhanced error context with hints and suggestions
+# group: [error]
+
+statement ok
+PRAGMA enable_verification
+
+# Test parser error with keyword hint (FRON -> FROM)
+statement error
+SELECT * FRON users;
+----
+FROM
+
+# Test parser error with keyword hint (SELEC -> SELECT)
+statement error
+SELEC * FROM users;
+----
+SELECT
+
+# Test parser error with keyword hint (WEHRE -> WHERE)
+statement error
+SELECT * FROM users WEHRE id = 1;
+----
+WHERE
+
+# Test parser error with keyword hint (GROPU -> GROUP)
+statement error
+SELECT name, COUNT(*) FROM users GROPU BY name;
+----
+GROUP
+
+# Test parser error with keyword hint (ORDR -> ORDER)
+statement error
+SELECT * FROM users ORDR BY name;
+----
+ORDER
+
+# Create test tables for binder error tests
+statement ok
+CREATE TABLE customers (customer_id INTEGER, customer_name VARCHAR, customer_email VARCHAR, city VARCHAR);
+
+statement ok
+CREATE TABLE orders (order_id INTEGER, customer_id INTEGER, amount DECIMAL(10,2), order_date DATE);
+
+# Test binder error with column suggestion (cusomer_id -> customer_id)
+statement error
+SELECT cusomer_id FROM customers;
+----
+customer_id
+
+# Test binder error with column suggestion (custmer_name -> customer_name)
+statement error
+SELECT custmer_name FROM customers;
+----
+customer_name
+
+# Test binder error with column suggestion in WHERE clause
+statement error
+SELECT * FROM customers WHERE cusomer_id = 1;
+----
+customer_id
+
+# Test binder error with column suggestion in JOIN
+statement error
+SELECT * FROM customers c JOIN orders o ON c.cusomer_id = o.customer_id;
+----
+customer_id
+
+# Test multiple similar columns - should suggest all
+statement error
+SELECT customer_idd FROM customers;
+----
+customer_id
+
+# Test ColumnNotFound factory method preserves suggestions
+statement error
+SELECT naem FROM customers;
+----
+Referenced column
+
+# Test that errors still work correctly for completely unrelated names
+statement error
+SELECT xyz123 FROM customers;
+----
+Referenced column
+
+# JSON error format test
+statement ok
+SET errors_as_json = true;
+
+# Test that hints appear in JSON error output
+statement error
+SELECT * FRON customers;
+----
+<REGEX>:.*"hint".*:.*"Did you mean FROM".*
+
+# Test that suggestions appear in JSON error output
+statement error
+SELECT cusomer_id FROM customers;
+----
+<REGEX>:.*"candidates".*:.*"customer_id".*
+
+statement ok
+SET errors_as_json = false;
+
+# Test parser error shows query context with caret
+statement error
+SELECT * FRON customers WHERE customer_id = 1;
+----
+FRON
+
+# Test that error message includes LINE indicator
+statement error
+SELECT *
+FRON customers;
+----
+LINE 2
+
+# Test INSERT statement keyword typo
+statement error
+ISERT INTO customers VALUES (1, 'Test', 'test@test.com', 'NYC');
+----
+INSERT
+
+# Test UPDATE statement keyword typo (SET -> SE)
+statement error
+UPDATE customers SE customer_name = 'New Name' WHERE customer_id = 1;
+----
+SET
+
+# Test DELETE statement keyword typo
+statement error
+DELTE FROM customers WHERE customer_id = 1;
+----
+DELETE
+
+# Test JOIN keyword typo
+statement error
+SELECT * FROM customers c INNR JOIN orders o ON c.customer_id = o.customer_id;
+----
+INNER
+
+# Test GROUP BY keyword typo
+statement error
+SELECT city, COUNT(*) FROM customers GORUP BY city;
+----
+GROUP
+
+# Clean up
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE customers;

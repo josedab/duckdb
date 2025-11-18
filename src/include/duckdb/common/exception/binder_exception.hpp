@@ -56,6 +56,14 @@ public:
 	static BinderException NoMatchingFunction(const string &catalog_name, const string &schema_name, const string &name,
 	                                          const vector<LogicalType> &arguments, const vector<string> &candidates);
 	static BinderException Unsupported(ParsedExpression &expr, const string &message);
+
+	//! Create an exception for when a table is not found
+	static BinderException TableNotFound(const string &name, const vector<string> &similar_tables,
+	                                     QueryErrorContext context = QueryErrorContext());
+
+	//! Create an exception for ambiguous column reference
+	static BinderException AmbiguousReference(const string &name, const vector<string> &tables,
+	                                          QueryErrorContext context = QueryErrorContext());
 };
 
 } // namespace duckdb
