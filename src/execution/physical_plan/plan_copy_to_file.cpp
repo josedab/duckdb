@@ -2,6 +2,7 @@
 #include "duckdb/execution/operator/persistent/physical_copy_to_file.hpp"
 #include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/planner/operator/logical_copy_to_file.hpp"
+#include "duckdb/main/config.hpp"
 
 namespace duckdb {
 
@@ -9,6 +10,21 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalCopyToFile &op) {
 	auto &plan = CreatePlan(*op.children[0]);
 	bool preserve_insertion_order = PhysicalPlanGenerator::PreserveInsertionOrder(context, plan);
 	bool supports_batch_index = PhysicalPlanGenerator::UseBatchIndex(context, plan);
+
+	// Check parallel DDL settings
+	auto &config = DBConfig::GetConfig(context);
+	bool parallel_ddl_disabled = false;
+	if (!config.options.parallel_ddl_enabled) {
+		parallel_ddl_disabled = true;
+		supports_batch_index = false;
+	} else {
+		// Check threshold
+		auto threshold = config.options.parallel_ddl_threshold;
+		if (threshold > 0 && op.estimated_cardinality < threshold) {
+			parallel_ddl_disabled = true;
+			supports_batch_index = false;
+		}
+	}
 
 	if (op.preserve_order == PreserveOrderType::PRESERVE_ORDER) {
 		preserve_insertion_order = true;
@@ -76,7 +92,7 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalCopyToFile &op) {
 	cast_copy.write_partition_columns = op.write_partition_columns;
 	cast_copy.names = op.names;
 	cast_copy.expected_types = op.expected_types;
-	cast_copy.parallel = mode == CopyFunctionExecutionMode::PARALLEL_COPY_TO_FILE;
+	cast_copy.parallel = (mode == CopyFunctionExecutionMode::PARALLEL_COPY_TO_FILE) && !parallel_ddl_disabled;
 	cast_copy.write_empty_file = op.write_empty_file;
 	cast_copy.hive_file_pattern = op.hive_file_pattern;
 

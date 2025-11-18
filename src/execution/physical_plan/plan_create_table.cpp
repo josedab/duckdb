@@ -20,6 +20,26 @@ PhysicalOperator &DuckCatalog::PlanCreateTableAs(ClientContext &context, Physica
 	bool parallel_streaming_insert = !PhysicalPlanGenerator::PreserveInsertionOrder(context, plan);
 	bool use_batch_index = PhysicalPlanGenerator::UseBatchIndex(context, plan);
 	auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
+
+	// Check parallel DDL settings
+	auto &config = DBConfig::GetConfig(context);
+	if (!config.options.parallel_ddl_enabled) {
+		parallel_streaming_insert = false;
+		use_batch_index = false;
+	} else {
+		// Check threshold
+		auto threshold = config.options.parallel_ddl_threshold;
+		if (threshold > 0 && op.estimated_cardinality < threshold) {
+			parallel_streaming_insert = false;
+			use_batch_index = false;
+		}
+		// Check ddl_threads setting
+		auto ddl_threads = config.options.parallel_ddl_threads;
+		if (ddl_threads > 0) {
+			num_threads = MinValue<idx_t>(num_threads, ddl_threads);
+		}
+	}
+
 	if (!parallel_streaming_insert && use_batch_index) {
 		auto &insert = planner.Make<PhysicalBatchInsert>(op, op.schema, std::move(op.info), 0U);
 		D_ASSERT(op.children.size() == 1);

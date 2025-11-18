@@ -1,0 +1,95 @@
+# name: test/sql/copy/test_parallel_ddl_copy.test
+# description: Test parallel DDL settings with COPY operations
+# group: [copy]
+
+require parquet
+
+# Create test data
+statement ok
+CREATE TABLE source_data AS SELECT range AS i FROM range(100000);
+
+# Test COPY with parallel DDL enabled (default)
+statement ok
+COPY source_data TO '__TEST_DIR__/parallel_copy.parquet' (FORMAT PARQUET);
+
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/parallel_copy.parquet'
+----
+100000
+
+# Test COPY with parallel DDL disabled
+statement ok
+SET parallel_ddl_enabled = false;
+
+statement ok
+COPY source_data TO '__TEST_DIR__/serial_copy.parquet' (FORMAT PARQUET);
+
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/serial_copy.parquet'
+----
+100000
+
+# Re-enable and test with threshold
+statement ok
+SET parallel_ddl_enabled = true;
+
+statement ok
+SET parallel_ddl_threshold = 200000;
+
+# With threshold higher than data size, should use serial
+statement ok
+COPY source_data TO '__TEST_DIR__/below_threshold_copy.parquet' (FORMAT PARQUET);
+
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/below_threshold_copy.parquet'
+----
+100000
+
+# Reset threshold and test with ddl_threads
+statement ok
+SET parallel_ddl_threshold = 100000;
+
+statement ok
+SET parallel_ddl_threads = 2;
+
+statement ok
+COPY source_data TO '__TEST_DIR__/limited_threads_copy.parquet' (FORMAT PARQUET);
+
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/limited_threads_copy.parquet'
+----
+100000
+
+# Test COPY FROM (loading data)
+statement ok
+CREATE TABLE target_data(i INTEGER);
+
+statement ok
+COPY target_data FROM '__TEST_DIR__/parallel_copy.parquet' (FORMAT PARQUET);
+
+query I
+SELECT COUNT(*) FROM target_data
+----
+100000
+
+query I
+SELECT SUM(i) FROM target_data
+----
+4999950000
+
+# Cleanup
+statement ok
+DROP TABLE source_data;
+
+statement ok
+DROP TABLE target_data;
+
+# Reset settings
+statement ok
+SET parallel_ddl_enabled = true;
+
+statement ok
+SET parallel_ddl_threshold = 100000;
+
+statement ok
+SET parallel_ddl_threads = 0;

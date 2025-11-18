@@ -222,6 +222,12 @@ struct DBConfigOptions {
 	ThreadPinMode pin_threads = ThreadPinMode::AUTO;
 	//! Physical memory that the block allocator is allowed to use (this memory is never freed and cannot be reduced)
 	idx_t block_allocator_size = 0;
+	//! Whether parallel DDL operations are enabled (INSERT, COPY, CREATE TABLE AS)
+	bool parallel_ddl_enabled = true;
+	//! The minimum number of rows required to trigger parallel DDL execution
+	idx_t parallel_ddl_threshold = 100000;
+	//! The number of threads to use for parallel DDL operations (0 = use all available threads)
+	idx_t parallel_ddl_threads = 0;
 
 	bool operator==(const DBConfigOptions &other) const;
 };

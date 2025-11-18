@@ -1,0 +1,171 @@
+# name: test/sql/insert/test_parallel_ddl_settings.test
+# description: Test parallel DDL settings (parallel_ddl_enabled, parallel_ddl_threshold, parallel_ddl_threads)
+# group: [insert]
+
+# Test default values of parallel DDL settings
+query I
+SELECT current_setting('parallel_ddl_enabled')
+----
+true
+
+query I
+SELECT current_setting('parallel_ddl_threshold')
+----
+100000
+
+query I
+SELECT current_setting('parallel_ddl_threads')
+----
+0
+
+# Test setting parallel_ddl_enabled
+statement ok
+SET parallel_ddl_enabled = false;
+
+query I
+SELECT current_setting('parallel_ddl_enabled')
+----
+false
+
+statement ok
+SET parallel_ddl_enabled = true;
+
+query I
+SELECT current_setting('parallel_ddl_enabled')
+----
+true
+
+# Test setting parallel_ddl_threshold
+statement ok
+SET parallel_ddl_threshold = 50000;
+
+query I
+SELECT current_setting('parallel_ddl_threshold')
+----
+50000
+
+statement ok
+SET parallel_ddl_threshold = 100000;
+
+# Test setting parallel_ddl_threads
+statement ok
+SET parallel_ddl_threads = 4;
+
+query I
+SELECT current_setting('parallel_ddl_threads')
+----
+4
+
+statement ok
+SET parallel_ddl_threads = 0;
+
+# Test INSERT with parallel DDL disabled
+statement ok
+CREATE TABLE test_insert(i INTEGER);
+
+statement ok
+SET parallel_ddl_enabled = false;
+
+statement ok
+INSERT INTO test_insert SELECT range FROM range(1000);
+
+query I
+SELECT COUNT(*) FROM test_insert
+----
+1000
+
+statement ok
+SET parallel_ddl_enabled = true;
+
+# Test INSERT with parallel DDL enabled
+statement ok
+INSERT INTO test_insert SELECT range FROM range(1000);
+
+query I
+SELECT COUNT(*) FROM test_insert
+----
+2000
+
+statement ok
+DROP TABLE test_insert;
+
+# Test CREATE TABLE AS with parallel DDL settings
+statement ok
+SET parallel_ddl_enabled = true;
+
+statement ok
+CREATE TABLE test_ctas AS SELECT range AS i FROM range(10000);
+
+query I
+SELECT COUNT(*) FROM test_ctas
+----
+10000
+
+statement ok
+DROP TABLE test_ctas;
+
+# Test with parallel_ddl_threshold - below threshold should not use parallel
+statement ok
+SET parallel_ddl_threshold = 20000;
+
+statement ok
+CREATE TABLE test_threshold AS SELECT range AS i FROM range(10000);
+
+query I
+SELECT COUNT(*) FROM test_threshold
+----
+10000
+
+statement ok
+DROP TABLE test_threshold;
+
+# Test with parallel_ddl_threads setting
+statement ok
+SET parallel_ddl_threads = 2;
+
+statement ok
+CREATE TABLE test_threads AS SELECT range AS i FROM range(50000);
+
+query I
+SELECT COUNT(*) FROM test_threads
+----
+50000
+
+statement ok
+DROP TABLE test_threads;
+
+# Reset settings
+statement ok
+SET parallel_ddl_enabled = true;
+
+statement ok
+SET parallel_ddl_threshold = 100000;
+
+statement ok
+SET parallel_ddl_threads = 0;
+
+# Test large parallel INSERT
+statement ok
+SET preserve_insertion_order = false;
+
+statement ok
+CREATE TABLE large_insert(i INTEGER);
+
+statement ok
+INSERT INTO large_insert SELECT range FROM range(200000);
+
+query I
+SELECT COUNT(*) FROM large_insert
+----
+200000
+
+query I
+SELECT SUM(i) FROM large_insert
+----
+19999900000
+
+statement ok
+DROP TABLE large_insert;
+
+statement ok
+SET preserve_insertion_order = true;
