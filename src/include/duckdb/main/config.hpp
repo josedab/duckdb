@@ -223,6 +223,14 @@ struct DBConfigOptions {
 	//! Physical memory that the block allocator is allowed to use (this memory is never freed and cannot be reduced)
 	idx_t block_allocator_size = 0;
 
+	//! JIT Expression Compilation Settings
+	//! Whether JIT compilation of expressions is enabled
+	bool enable_jit_compilation = false;
+	//! Number of expression executions before compiling to native code
+	idx_t jit_compilation_threshold = 10000;
+	//! Maximum size of the JIT compilation cache in bytes (default: 100MB)
+	idx_t jit_cache_size = 104857600;
+
 	bool operator==(const DBConfigOptions &other) const;
 };
 

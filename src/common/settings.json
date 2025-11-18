@@ -424,6 +424,15 @@
         "struct": "EnableHTTPMetadataCacheSetting"
     },
     {
+        "name": "enable_jit_compilation",
+        "description": "Enable Just-In-Time compilation of expressions for improved performance",
+        "type": "BOOLEAN",
+        "scope": "global",
+        "internal_setting": "enable_jit_compilation",
+        "default_scope": "global",
+        "default_value": "false"
+    },
+    {
         "name": "enable_logging",
         "description": "Enables the logger",
         "type": "BOOLEAN",
@@ -617,6 +626,23 @@
         "type": "BOOLEAN",
         "default_scope": "local",
         "default_value": "false"
+    },
+    {
+        "name": "jit_cache_size",
+        "description": "The maximum size of the JIT compilation cache in bytes (e.g. 100MB)",
+        "type": "VARCHAR",
+        "scope": "global",
+        "internal_setting": "jit_cache_size",
+        "custom_implementation": true
+    },
+    {
+        "name": "jit_compilation_threshold",
+        "description": "Number of expression executions before compiling to native code",
+        "type": "UBIGINT",
+        "scope": "global",
+        "internal_setting": "jit_compilation_threshold",
+        "default_scope": "global",
+        "default_value": "10000"
     },
     {
         "name": "lambda_syntax",

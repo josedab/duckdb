@@ -1,0 +1,126 @@
+# name: test/sql/projection/test_jit_compilation.test
+# description: Test JIT expression compilation infrastructure
+# group: [projection]
+
+statement ok
+PRAGMA enable_verification
+
+# Test default settings for JIT compilation
+query I
+SELECT current_setting('enable_jit_compilation')::boolean
+----
+false
+
+query I
+SELECT current_setting('jit_compilation_threshold')::bigint
+----
+10000
+
+# Test enabling JIT compilation
+statement ok
+SET enable_jit_compilation = true
+
+query I
+SELECT current_setting('enable_jit_compilation')::boolean
+----
+true
+
+# Test setting JIT compilation threshold
+statement ok
+SET jit_compilation_threshold = 5000
+
+query I
+SELECT current_setting('jit_compilation_threshold')::bigint
+----
+5000
+
+# Test resetting to default
+statement ok
+RESET enable_jit_compilation
+
+query I
+SELECT current_setting('enable_jit_compilation')::boolean
+----
+false
+
+statement ok
+RESET jit_compilation_threshold
+
+query I
+SELECT current_setting('jit_compilation_threshold')::bigint
+----
+10000
+
+# Test the JIT cache info table function
+query IIIIIIII
+SELECT cache_size_bytes, entry_count, hit_count, miss_count, hit_rate, max_cache_size_bytes, jit_enabled, compilation_threshold FROM duckdb_jit_cache()
+----
+0	0	0	0	0.0	104857600	false	10000
+
+# Test with JIT enabled
+statement ok
+SET enable_jit_compilation = true
+
+query IIIIIIII
+SELECT cache_size_bytes, entry_count, hit_count, miss_count, hit_rate, max_cache_size_bytes, jit_enabled, compilation_threshold FROM duckdb_jit_cache()
+----
+0	0	0	0	0.0	104857600	true	10000
+
+# Test expression-heavy queries (these should work regardless of JIT status)
+statement ok
+CREATE TABLE jit_test (a INTEGER, b INTEGER, c INTEGER, d INTEGER)
+
+statement ok
+INSERT INTO jit_test VALUES (1, 2, 3, 4), (5, 6, 7, 8), (10, 20, 30, 40)
+
+# Complex arithmetic expressions
+query I
+SELECT (a + b) * (c - d) FROM jit_test ORDER BY a
+----
+-3
+-11
+-300
+
+# Multiple nested expressions
+query I
+SELECT ((a * b) + (c * d)) * (a - b + c - d) FROM jit_test ORDER BY a
+----
+-28
+-176
+-16000
+
+# Comparison expressions
+query I
+SELECT CASE WHEN a > b THEN 1 WHEN a = b THEN 0 ELSE -1 END FROM jit_test ORDER BY a
+----
+-1
+-1
+-1
+
+# Mixed arithmetic and comparison
+query I
+SELECT CASE WHEN (a + b) > (c + d) THEN a * b ELSE c * d END FROM jit_test ORDER BY a
+----
+12
+56
+1200
+
+# Test with boolean expressions
+query I
+SELECT CAST((a > 0 AND b > 0) AS INTEGER) FROM jit_test ORDER BY a
+----
+1
+1
+1
+
+# Test with type casts
+query I
+SELECT CAST(a AS BIGINT) + CAST(b AS BIGINT) FROM jit_test ORDER BY a
+----
+3
+11
+30
+
+# Reset for cleanup
+statement ok
+RESET enable_jit_compilation

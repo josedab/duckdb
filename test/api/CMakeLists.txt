@@ -31,6 +31,7 @@ set(TEST_API_OBJECTS
     test_progress_bar.cpp
     test_uuid.cpp
     test_insertion_order_preserving_map.cpp
+    test_jit_expression_compiler.cpp
     test_bignum.cpp
     test_threads.cpp
     test_windows_header_compatibility.cpp

@@ -14,6 +14,7 @@ add_library_unity(
   duckdb_log.cpp
   duckdb_log_contexts.cpp
   duckdb_indexes.cpp
+  duckdb_jit_cache.cpp
   duckdb_memory.cpp
   duckdb_optimizers.cpp
   duckdb_schemas.cpp
