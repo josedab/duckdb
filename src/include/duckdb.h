@@ -407,11 +407,25 @@ typedef struct {
 	duckdb_hugeint value;
 } duckdb_decimal;
 
+//! Query progress status enum
+typedef enum {
+	DUCKDB_QUERY_PROGRESS_RUNNING = 0,
+	DUCKDB_QUERY_PROGRESS_FINISHED = 1,
+	DUCKDB_QUERY_PROGRESS_ERROR = 2,
+	DUCKDB_QUERY_PROGRESS_CANCELLED = 3
+} duckdb_query_progress_status;
+
 //! A type holding information about the query execution progress.
 typedef struct {
 	double percentage;
 	uint64_t rows_processed;
 	uint64_t total_rows_to_process;
+	//! Time elapsed since query start in seconds
+	double elapsed_seconds;
+	//! Estimated remaining time in seconds (-1 if unknown)
+	double estimated_remaining_seconds;
+	//! Current query status
+	duckdb_query_progress_status status;
 } duckdb_query_progress_type;
 
 //! The internal representation of a VARCHAR (string_t). If the VARCHAR does not

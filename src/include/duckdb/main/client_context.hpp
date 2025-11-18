@@ -29,8 +29,29 @@
 #include "duckdb/planner/expression/bound_parameter_data.hpp"
 #include "duckdb/transaction/transaction_context.hpp"
 #include "duckdb/main/query_parameters.hpp"
+#include "duckdb/common/progress_bar/progress_bar.hpp"
 
 namespace duckdb {
+
+//! Progress callback function type
+//! This callback is invoked periodically during query execution with progress information.
+//! The callback receives a QueryProgress object containing:
+//! - percentage: Current progress (0-100)
+//! - rows_processed: Number of rows processed so far
+//! - total_rows_to_process: Estimated total rows
+//! - elapsed_seconds: Time elapsed since query start
+//! - estimated_remaining_seconds: Estimated time remaining
+//! - status: Current query status (RUNNING, FINISHED, ERROR, CANCELLED)
+//!
+//! Example usage:
+//! @code
+//! con.context->SetProgressCallback([](QueryProgress progress) {
+//!     std::cout << progress.GetPercentage() << "% complete" << std::endl;
+//! });
+//! con.context->SetProgressInterval(100); // Call every 100ms
+//! con.Query("SELECT * FROM large_table");
+//! @endcode
+using ProgressCallback = std::function<void(QueryProgress)>;
 
 class Appender;
 class Catalog;
@@ -178,6 +199,15 @@ public:
 	//! Gets current percentage of the query's progress, returns 0 in case the progress bar is disabled.
 	DUCKDB_API QueryProgress GetQueryProgress();
 
+	//! Set a callback function to be called with progress updates
+	DUCKDB_API void SetProgressCallback(ProgressCallback callback);
+
+	//! Set the interval (in milliseconds) between progress callback invocations
+	DUCKDB_API void SetProgressInterval(idx_t milliseconds);
+
+	//! Get the current progress callback interval
+	DUCKDB_API idx_t GetProgressInterval() const;
+
 	//! Register function in the temporary schema
 	DUCKDB_API void RegisterFunction(CreateFunctionInfo &info);
 
@@ -318,7 +348,16 @@ private:
 	QueryProgress query_progress;
 	//! The connection corresponding to this client context
 	connection_t connection_id;
+	//! Progress callback function
+	ProgressCallback progress_callback;
+	//! Progress callback interval in milliseconds (default: 100ms)
+	idx_t progress_callback_interval = 100;
+	//! Last time the progress callback was invoked
+	double last_callback_time = 0;
 };
+
+//! Check if progress callback should be invoked based on interval
+bool ShouldInvokeProgressCallback(double elapsed, double last_callback, idx_t interval);
 
 class ClientContextLock {
 public:

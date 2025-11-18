@@ -19,6 +19,14 @@ namespace duckdb {
 struct ClientConfig;
 typedef unique_ptr<ProgressBarDisplay> (*progress_bar_display_create_func_t)();
 
+//! Query progress status enum
+enum class QueryProgressStatus : uint8_t {
+	RUNNING = 0,
+	FINISHED = 1,
+	ERROR = 2,
+	CANCELLED = 3
+};
+
 struct QueryProgress {
 	friend class ProgressBar;
 
@@ -29,6 +37,23 @@ public:
 	double GetPercentage();
 	uint64_t GetRowsProcesseed();
 	uint64_t GetTotalRowsToProcess();
+
+	//! Get timing information
+	double GetElapsedSeconds();
+	double GetEstimatedRemainingSeconds();
+
+	//! Get current operator name
+	string GetCurrentOperator();
+
+	//! Get query status
+	QueryProgressStatus GetStatus();
+
+	//! Set methods for additional fields
+	void SetElapsedSeconds(double elapsed);
+	void SetEstimatedRemainingSeconds(double remaining);
+	void SetCurrentOperator(const string &op);
+	void SetStatus(QueryProgressStatus status);
+
 	QueryProgress &operator=(const QueryProgress &other);
 	QueryProgress(const QueryProgress &other);
 
@@ -36,6 +61,17 @@ private:
 	atomic<double> percentage;
 	atomic<uint64_t> rows_processed;
 	atomic<uint64_t> total_rows_to_process;
+
+	//! Timing information
+	atomic<double> elapsed_seconds;
+	atomic<double> estimated_remaining_seconds;
+
+	//! Current operator being processed
+	string current_operator;
+	mutex operator_lock;
+
+	//! Query execution status
+	atomic<QueryProgressStatus> status;
 };
 
 class ProgressBar {

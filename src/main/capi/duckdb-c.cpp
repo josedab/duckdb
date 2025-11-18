@@ -124,6 +124,9 @@ duckdb_query_progress_type duckdb_query_progress(duckdb_connection connection) {
 	query_progress_type.percentage = -1;
 	query_progress_type.total_rows_to_process = 0;
 	query_progress_type.rows_processed = 0;
+	query_progress_type.elapsed_seconds = 0;
+	query_progress_type.estimated_remaining_seconds = -1;
+	query_progress_type.status = DUCKDB_QUERY_PROGRESS_RUNNING;
 	if (!connection) {
 		return query_progress_type;
 	}
@@ -132,6 +135,9 @@ duckdb_query_progress_type duckdb_query_progress(duckdb_connection connection) {
 	query_progress_type.total_rows_to_process = query_progress.GetTotalRowsToProcess();
 	query_progress_type.rows_processed = query_progress.GetRowsProcesseed();
 	query_progress_type.percentage = query_progress.GetPercentage();
+	query_progress_type.elapsed_seconds = query_progress.GetElapsedSeconds();
+	query_progress_type.estimated_remaining_seconds = query_progress.GetEstimatedRemainingSeconds();
+	query_progress_type.status = static_cast<duckdb_query_progress_status>(query_progress.GetStatus());
 	return query_progress_type;
 }
 

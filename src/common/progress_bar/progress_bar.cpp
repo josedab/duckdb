@@ -8,12 +8,26 @@ void QueryProgress::Initialize() {
 	percentage = -1;
 	rows_processed = 0;
 	total_rows_to_process = 0;
+	elapsed_seconds = 0;
+	estimated_remaining_seconds = -1;
+	{
+		lock_guard<mutex> guard(operator_lock);
+		current_operator = "";
+	}
+	status = QueryProgressStatus::RUNNING;
 }
 
 void QueryProgress::Restart() {
 	percentage = 0;
 	rows_processed = 0;
 	total_rows_to_process = 0;
+	elapsed_seconds = 0;
+	estimated_remaining_seconds = -1;
+	{
+		lock_guard<mutex> guard(operator_lock);
+		current_operator = "";
+	}
+	status = QueryProgressStatus::RUNNING;
 }
 
 double QueryProgress::GetPercentage() {
@@ -26,6 +40,40 @@ uint64_t QueryProgress::GetTotalRowsToProcess() {
 	return total_rows_to_process;
 }
 
+double QueryProgress::GetElapsedSeconds() {
+	return elapsed_seconds;
+}
+
+double QueryProgress::GetEstimatedRemainingSeconds() {
+	return estimated_remaining_seconds;
+}
+
+string QueryProgress::GetCurrentOperator() {
+	lock_guard<mutex> guard(operator_lock);
+	return current_operator;
+}
+
+QueryProgressStatus QueryProgress::GetStatus() {
+	return status;
+}
+
+void QueryProgress::SetElapsedSeconds(double elapsed) {
+	elapsed_seconds = elapsed;
+}
+
+void QueryProgress::SetEstimatedRemainingSeconds(double remaining) {
+	estimated_remaining_seconds = remaining;
+}
+
+void QueryProgress::SetCurrentOperator(const string &op) {
+	lock_guard<mutex> guard(operator_lock);
+	current_operator = op;
+}
+
+void QueryProgress::SetStatus(QueryProgressStatus new_status) {
+	status = new_status;
+}
+
 QueryProgress::QueryProgress() {
 	Initialize();
 }
@@ -35,6 +83,14 @@ QueryProgress &QueryProgress::operator=(const QueryProgress &other) {
 		percentage = other.percentage.load();
 		rows_processed = other.rows_processed.load();
 		total_rows_to_process = other.total_rows_to_process.load();
+		elapsed_seconds = other.elapsed_seconds.load();
+		estimated_remaining_seconds = other.estimated_remaining_seconds.load();
+		{
+			lock_guard<mutex> guard(operator_lock);
+			lock_guard<mutex> other_guard(const_cast<mutex &>(other.operator_lock));
+			current_operator = other.current_operator;
+		}
+		status = other.status.load();
 	}
 	return *this;
 }
@@ -43,6 +99,13 @@ QueryProgress::QueryProgress(const QueryProgress &other) {
 	percentage = other.percentage.load();
 	rows_processed = other.rows_processed.load();
 	total_rows_to_process = other.total_rows_to_process.load();
+	elapsed_seconds = other.elapsed_seconds.load();
+	estimated_remaining_seconds = other.estimated_remaining_seconds.load();
+	{
+		lock_guard<mutex> other_guard(const_cast<mutex &>(other.operator_lock));
+		current_operator = other.current_operator;
+	}
+	status = other.status.load();
 }
 
 void ProgressBar::SystemOverrideCheck(ClientConfig &config) {
@@ -129,6 +192,28 @@ void ProgressBar::Update(bool final) {
 	if (new_percentage > query_progress.percentage) {
 		query_progress.percentage = new_percentage;
 	}
+
+	// Update timing information
+	double elapsed = profiler.Elapsed();
+	query_progress.SetElapsedSeconds(elapsed);
+
+	// Estimate remaining time based on progress
+	double current_percentage = query_progress.percentage.load();
+	if (current_percentage > 0 && current_percentage < 100) {
+		double estimated_total = elapsed / (current_percentage / 100.0);
+		double remaining = estimated_total - elapsed;
+		query_progress.SetEstimatedRemainingSeconds(remaining > 0 ? remaining : 0);
+	} else if (current_percentage >= 100) {
+		query_progress.SetEstimatedRemainingSeconds(0);
+	}
+
+	// Update status
+	if (final) {
+		query_progress.SetStatus(QueryProgressStatus::FINISHED);
+	} else {
+		query_progress.SetStatus(QueryProgressStatus::RUNNING);
+	}
+
 	if (ShouldPrint(final)) {
 		if (final) {
 			FinishProgressBarPrint();

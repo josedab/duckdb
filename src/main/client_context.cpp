@@ -466,6 +466,27 @@ QueryProgress ClientContext::GetQueryProgress() {
 	return query_progress;
 }
 
+void ClientContext::SetProgressCallback(ProgressCallback callback) {
+	progress_callback = std::move(callback);
+	// Enable progress bar if a callback is set (needed for progress tracking)
+	if (progress_callback) {
+		config.enable_progress_bar = true;
+	}
+}
+
+void ClientContext::SetProgressInterval(idx_t milliseconds) {
+	progress_callback_interval = milliseconds;
+}
+
+idx_t ClientContext::GetProgressInterval() const {
+	return progress_callback_interval;
+}
+
+bool ShouldInvokeProgressCallback(double elapsed, double last_callback, idx_t interval) {
+	double interval_seconds = static_cast<double>(interval) / 1000.0;
+	return (elapsed - last_callback) >= interval_seconds;
+}
+
 void BindPreparedStatementParameters(PreparedStatementData &statement, const PendingQueryParameters &parameters) {
 	case_insensitive_map_t<BoundParameterData> owned_values;
 	if (parameters.parameters) {
@@ -538,6 +559,7 @@ ClientContext::PendingPreparedStatementInternal(ClientContextLock &lock,
 		    make_uniq<ProgressBar>(executor, NumericCast<idx_t>(config.wait_time), display_create_func);
 		active_query->progress_bar->Start();
 		query_progress.Restart();
+		last_callback_time = 0;
 	}
 
 	const auto stream_result = parameters.query_parameters.output_type == QueryResultOutputType::ALLOW_STREAMING &&
@@ -608,6 +630,19 @@ PendingExecutionResult ClientContext::ExecuteTaskInternal(ClientContextLock &loc
 			auto is_finished = PendingQueryResult::IsResultReady(query_result);
 			active_query->progress_bar->Update(is_finished);
 			query_progress = active_query->progress_bar->GetDetailedQueryProgress();
+
+			// Invoke progress callback if set and interval has elapsed
+			if (progress_callback) {
+				double elapsed = query_progress.GetElapsedSeconds();
+				if (is_finished || ShouldInvokeProgressCallback(elapsed, last_callback_time, progress_callback_interval)) {
+					last_callback_time = elapsed;
+					try {
+						progress_callback(query_progress);
+					} catch (...) {
+						// Silently ignore callback exceptions to not interrupt query execution
+					}
+				}
+			}
 		}
 		return query_result;
 	} catch (std::exception &ex) {
