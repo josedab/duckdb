@@ -80,6 +80,11 @@ struct ClientConfig {
 	//! True by default
 	bool use_replacement_scans = true;
 
+	//! Enable adaptive join algorithm selection based on runtime cardinalities
+	bool adaptive_join_enabled = true;
+	//! Threshold for switching from hash join to nested loop join
+	idx_t adaptive_join_nested_loop_threshold = 128;
+
 	//! The maximum amount of memory to keep buffered in a streaming query result. Default: 1mb.
 	idx_t streaming_buffer_size = 1000000;
 

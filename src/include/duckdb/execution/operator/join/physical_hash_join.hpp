@@ -14,8 +14,13 @@
 #include "duckdb/execution/operator/join/physical_comparison_join.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
+#include "duckdb/execution/operator/join/join_algorithm.hpp"
+#include "duckdb/execution/operator/join/join_execution_state.hpp"
+#include "duckdb/execution/operator/join/join_thresholds.hpp"
 
 namespace duckdb {
+
+class HashJoinGlobalSinkState;
 
 //! PhysicalHashJoin represents a hash loop join between two tables
 class PhysicalHashJoin : public PhysicalComparisonJoin {
@@ -56,6 +61,22 @@ public:
 
 public:
 	InsertionOrderPreservingMap<string> ParamsToString() const override;
+
+	//===--------------------------------------------------------------------===//
+	// Adaptive Join Selection
+	//===--------------------------------------------------------------------===//
+	//! Check if switching to a different algorithm is beneficial
+	static bool ShouldSwitch(HashJoinGlobalSinkState &gstate, const JoinExecutionState &state,
+	                         const JoinThresholds &thresholds);
+
+	//! Estimate the cost of completing the join with the current hash algorithm
+	static double EstimateRemainingHashCost(const JoinExecutionState &state, const JoinThresholds &thresholds);
+
+	//! Estimate the cost of switching to a merge join
+	static double EstimateMergeCost(const JoinExecutionState &state, const JoinThresholds &thresholds);
+
+	//! Estimate the cost of switching to a nested loop join
+	static double EstimateNestedLoopCost(const JoinExecutionState &state, const JoinThresholds &thresholds);
 
 public:
 	// Operator Interface

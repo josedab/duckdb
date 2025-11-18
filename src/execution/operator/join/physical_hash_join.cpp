@@ -1,5 +1,6 @@
 #include "duckdb/execution/operator/join/physical_hash_join.hpp"
 
+#include <cmath>
 #include "duckdb/common/radix_partitioning.hpp"
 #include "duckdb/common/types/value_map.hpp"
 #include "duckdb/execution/expression_executor.hpp"
@@ -109,6 +110,73 @@ PhysicalHashJoin::PhysicalHashJoin(PhysicalPlan &physical_plan, LogicalOperator 
 }
 
 //===--------------------------------------------------------------------===//
+// Adaptive Join Selection
+//===--------------------------------------------------------------------===//
+
+bool PhysicalHashJoin::ShouldSwitch(HashJoinGlobalSinkState &gstate, const JoinExecutionState &state,
+                                    const JoinThresholds &thresholds) {
+	// Don't evaluate if we haven't seen enough rows
+	if (state.build_rows_seen < thresholds.min_rows_for_evaluation) {
+		return false;
+	}
+
+	// Check if build side is small enough for nested loop
+	if (state.build_rows_seen < thresholds.nested_loop_threshold) {
+		// Build side tiny - nested loop would be faster
+		return true;
+	}
+
+	// Check hash table efficiency
+	double collision_rate = state.GetCollisionRate();
+	if (collision_rate > thresholds.high_collision_threshold) {
+		// Poor hash distribution - consider switching
+		// Compare costs to make the final decision
+		double hash_cost = EstimateRemainingHashCost(state, thresholds);
+		double merge_cost = EstimateMergeCost(state, thresholds);
+
+		if (merge_cost < hash_cost * thresholds.switch_threshold) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+double PhysicalHashJoin::EstimateRemainingHashCost(const JoinExecutionState &state, const JoinThresholds &thresholds) {
+	// Probe cost: per-row hash + lookup
+	double probe_cost = static_cast<double>(state.probe_rows_seen) *
+	                    (JoinThresholds::HASH_COST + JoinThresholds::LOOKUP_COST);
+
+	// Adjust for collision rate
+	double collision_rate = state.GetCollisionRate();
+	probe_cost *= (1.0 + collision_rate * JoinThresholds::COLLISION_PENALTY);
+
+	return probe_cost;
+}
+
+double PhysicalHashJoin::EstimateMergeCost(const JoinExecutionState &state, const JoinThresholds &thresholds) {
+	// Sort cost for build side (n log n)
+	double build_rows = static_cast<double>(state.build_rows_seen);
+	double sort_cost = 0.0;
+	if (build_rows > 1) {
+		sort_cost = build_rows * log2(build_rows) * JoinThresholds::COMPARE_COST;
+	}
+
+	// Merge cost: linear scan of both sides
+	double merge_cost = (build_rows + static_cast<double>(state.probe_rows_seen)) * JoinThresholds::COMPARE_COST;
+
+	return sort_cost + merge_cost;
+}
+
+double PhysicalHashJoin::EstimateNestedLoopCost(const JoinExecutionState &state, const JoinThresholds &thresholds) {
+	// Nested loop cost: O(n * m) comparisons
+	double cost = static_cast<double>(state.build_rows_seen) * static_cast<double>(state.probe_rows_seen) *
+	              JoinThresholds::COMPARE_COST;
+
+	return cost;
+}
+
+//===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//
 JoinFilterGlobalState::~JoinFilterGlobalState() {
@@ -139,6 +207,11 @@ public:
 	      active_local_states(0), total_size(0), max_partition_size(0), max_partition_count(0),
 	      probe_side_requirement(0), scanned_data(false) {
 		hash_table = op.InitializeHashTable(context);
+
+		// Initialize adaptive join settings from client context
+		auto &config = ClientConfig::GetConfig(context);
+		adaptive_join_enabled = config.adaptive_join_enabled;
+		adaptive_thresholds.nested_loop_threshold = config.adaptive_join_nested_loop_threshold;
 
 		// For perfect hash join
 		perfect_join_executor = make_uniq<PerfectHashJoinExecutor>(op, *hash_table);
@@ -207,6 +280,15 @@ public:
 
 	bool skip_filter_pushdown = false;
 	unique_ptr<JoinFilterGlobalState> global_filter_state;
+
+	//! Adaptive join selection state
+	JoinExecutionState adaptive_state;
+	//! Current join algorithm being used
+	JoinAlgorithm current_algorithm = JoinAlgorithm::HASH_JOIN;
+	//! Whether adaptive join selection is enabled
+	bool adaptive_join_enabled = true;
+	//! Thresholds for adaptive switching
+	JoinThresholds adaptive_thresholds;
 };
 
 unique_ptr<JoinFilterLocalState> JoinFilterPushdownInfo::GetLocalState(JoinFilterGlobalState &gstate) const {
@@ -345,6 +427,11 @@ SinkResultType PhysicalHashJoin::Sink(ExecutionContext &context, DataChunk &chun
 
 	// build the HT
 	lstate.hash_table->Build(lstate.append_state, lstate.join_keys, lstate.payload_chunk);
+
+	// Track build side cardinality for adaptive join selection
+	if (gstate.adaptive_join_enabled) {
+		gstate.adaptive_state.build_rows_seen += chunk.size();
+	}
 
 	return SinkResultType::NEED_MORE_INPUT;
 }

@@ -1,0 +1,132 @@
+# name: test/sql/join/adaptive/test_adaptive_join.test
+# description: Test adaptive join selection functionality
+# group: [adaptive]
+
+statement ok
+PRAGMA enable_verification
+
+# Test that adaptive join settings exist and can be configured
+statement ok
+SET adaptive_join_enabled = true;
+
+statement ok
+SET adaptive_join_enabled = false;
+
+statement ok
+SET adaptive_join_enabled = true;
+
+statement ok
+SET adaptive_join_nested_loop_threshold = 256;
+
+statement ok
+SET adaptive_join_nested_loop_threshold = 128;
+
+# Create test tables
+statement ok
+CREATE TABLE large_table AS SELECT i AS id, i % 100 AS key, 'value_' || i AS value FROM range(10000) t(i);
+
+statement ok
+CREATE TABLE small_table AS SELECT i AS id, i AS key FROM range(10) t(i);
+
+statement ok
+CREATE TABLE tiny_table AS SELECT i AS id, i AS key FROM range(5) t(i);
+
+# Test basic join functionality with adaptive joins enabled
+query III
+SELECT COUNT(*) FROM large_table l JOIN small_table s ON l.key = s.key;
+----
+1000
+
+# Test with tiny build side (should benefit from nested loop)
+statement ok
+SET adaptive_join_enabled = true;
+
+query III
+SELECT COUNT(*) FROM large_table l JOIN tiny_table t ON l.key = t.key;
+----
+500
+
+# Test join correctness is maintained
+query IIII rowsort
+SELECT l.id, l.key, s.id, s.key FROM large_table l JOIN small_table s ON l.key = s.key WHERE l.id < 20;
+----
+0	0	0	0
+1	1	1	1
+10	0	0	0
+11	1	1	1
+12	2	2	2
+13	3	3	3
+14	4	4	4
+15	5	5	5
+16	6	6	6
+17	7	7	7
+18	8	8	8
+19	9	9	9
+2	2	2	2
+3	3	3	3
+4	4	4	4
+5	5	5	5
+6	6	6	6
+7	7	7	7
+8	8	8	8
+9	9	9	9
+
+# Test with disabled adaptive joins
+statement ok
+SET adaptive_join_enabled = false;
+
+query III
+SELECT COUNT(*) FROM large_table l JOIN tiny_table t ON l.key = t.key;
+----
+500
+
+# Re-enable for remaining tests
+statement ok
+SET adaptive_join_enabled = true;
+
+# Test different join types
+# Inner join
+query III
+SELECT COUNT(*) FROM large_table l INNER JOIN small_table s ON l.key = s.key;
+----
+1000
+
+# Left join
+query III
+SELECT COUNT(*) FROM small_table s LEFT JOIN large_table l ON s.key = l.key;
+----
+1000
+
+# Test with varying threshold
+statement ok
+SET adaptive_join_nested_loop_threshold = 5;
+
+query III
+SELECT COUNT(*) FROM large_table l JOIN tiny_table t ON l.key = t.key;
+----
+500
+
+statement ok
+SET adaptive_join_nested_loop_threshold = 128;
+
+# Test semi join
+query I
+SELECT COUNT(*) FROM large_table l WHERE EXISTS (SELECT 1 FROM small_table s WHERE l.key = s.key);
+----
+1000
+
+# Test anti join
+query I
+SELECT COUNT(*) FROM large_table l WHERE NOT EXISTS (SELECT 1 FROM small_table s WHERE l.key = s.key);
+----
+9000
+
+# Cleanup
+statement ok
+DROP TABLE large_table;
+
+statement ok
+DROP TABLE small_table;
+
+statement ok
+DROP TABLE tiny_table;

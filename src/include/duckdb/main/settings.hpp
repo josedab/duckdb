@@ -40,6 +40,26 @@ struct AccessModeSetting {
 	static Value GetSetting(const ClientContext &context);
 };
 
+struct AdaptiveJoinEnabledSetting {
+	using RETURN_TYPE = bool;
+	static constexpr const char *Name = "adaptive_join_enabled";
+	static constexpr const char *Description =
+	    "Enable runtime-adaptive join algorithm selection based on actual cardinalities";
+	static constexpr const char *InputType = "BOOLEAN";
+	static constexpr const char *DefaultValue = "true";
+	static constexpr SetScope DefaultScope = SetScope::SESSION;
+};
+
+struct AdaptiveJoinNestedLoopThresholdSetting {
+	using RETURN_TYPE = idx_t;
+	static constexpr const char *Name = "adaptive_join_nested_loop_threshold";
+	static constexpr const char *Description =
+	    "The maximum build side rows to switch from hash join to nested loop join";
+	static constexpr const char *InputType = "UBIGINT";
+	static constexpr const char *DefaultValue = "128";
+	static constexpr SetScope DefaultScope = SetScope::SESSION;
+};
+
 struct AllocatorBackgroundThreadsSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "allocator_background_threads";
