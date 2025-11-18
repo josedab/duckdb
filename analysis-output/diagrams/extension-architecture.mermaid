@@ -1,0 +1,73 @@
+%% DuckDB Extension Architecture
+%% Commit: 52a07d06eafb63b60ed6275a494b85f93be4b986
+
+graph TB
+    subgraph "DuckDB Core"
+        CATALOG[Catalog]
+        FUNCREG[Function Registry]
+        FILESYSTEM[File System]
+        TYPEYSTEM[Type System]
+    end
+
+    subgraph "Extension Interface"
+        EXTINIT[Extension Init]
+        EXTVER[Version Check]
+    end
+
+    subgraph "Built-in Extensions"
+        PARQUET[Parquet<br/>Columnar I/O]
+        JSON[JSON<br/>Document Support]
+        ICU[ICU<br/>Unicode]
+    end
+
+    subgraph "Loadable Extensions"
+        HTTPFS[HTTPFS<br/>Remote Files]
+        POSTGRES[PostgreSQL<br/>Scanner]
+        SPATIAL[Spatial<br/>GIS Functions]
+    end
+
+    subgraph "Extension Capabilities"
+        SCALAR[Scalar Functions]
+        AGG[Aggregate Functions]
+        TABLE[Table Functions]
+        TYPES[Custom Types]
+        COPY[Copy Functions]
+        OPCLASS[Operator Classes]
+    end
+
+    %% Extension loading
+    EXTINIT --> CATALOG
+    EXTINIT --> FUNCREG
+    EXTINIT --> FILESYSTEM
+    EXTINIT --> TYPEYSTEM
+
+    %% Built-in extensions
+    PARQUET --> EXTINIT
+    JSON --> EXTINIT
+    ICU --> EXTINIT
+
+    %% Loadable extensions
+    HTTPFS --> EXTINIT
+    POSTGRES --> EXTINIT
+    SPATIAL --> EXTINIT
+
+    %% Capabilities
+    SCALAR --> FUNCREG
+    AGG --> FUNCREG
+    TABLE --> FUNCREG
+    TYPES --> CATALOG
+    COPY --> CATALOG
+    OPCLASS --> CATALOG
+
+    %% Styling
+    classDef core fill:#e3f2fd
+    classDef interface fill:#f3e5f5
+    classDef builtin fill:#e8f5e9
+    classDef loadable fill:#fff3e0
+    classDef capability fill:#fce4ec
+
+    class CATALOG,FUNCREG,FILESYSTEM,TYPEYSTEM core
+    class EXTINIT,EXTVER interface
+    class PARQUET,JSON,ICU builtin
+    class HTTPFS,POSTGRES,SPATIAL loadable
+    class SCALAR,AGG,TABLE,TYPES,COPY,OPCLASS capability

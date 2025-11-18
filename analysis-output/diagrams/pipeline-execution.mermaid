@@ -1,0 +1,81 @@
+%% DuckDB Pipeline Execution Model
+%% Commit: 52a07d06eafb63b60ed6275a494b85f93be4b986
+
+graph TB
+    subgraph "Query Plan"
+        AGG[Aggregate<br/>GROUP BY name]
+        FILTER[Filter<br/>status = 'active']
+        SCAN[Table Scan<br/>users]
+    end
+
+    subgraph "Pipeline Structure"
+        direction TB
+        PIPE1[Pipeline 1]
+        PIPE2[Pipeline 2]
+    end
+
+    subgraph "Pipeline 1: Build"
+        SRC1[Source: Scan]
+        OP1[Operator: Filter]
+        SINK1[Sink: Hash Table Build]
+    end
+
+    subgraph "Pipeline 2: Aggregate"
+        SRC2[Source: Hash Table]
+        SINK2[Sink: Result Collector]
+    end
+
+    subgraph "Parallel Execution"
+        T1[Thread 1]
+        T2[Thread 2]
+        TN[Thread N]
+    end
+
+    subgraph "Work Stealing"
+        Q1[Queue 1]
+        Q2[Queue 2]
+        QN[Queue N]
+    end
+
+    %% Plan to pipeline
+    SCAN --> PIPE1
+    FILTER --> PIPE1
+    AGG --> PIPE2
+
+    %% Pipeline 1 structure
+    PIPE1 --> SRC1
+    SRC1 --> OP1
+    OP1 --> SINK1
+
+    %% Pipeline 2 structure
+    PIPE2 --> SRC2
+    SRC2 --> SINK2
+
+    %% Pipeline break
+    SINK1 -.->|Materialization| SRC2
+
+    %% Parallel execution
+    PIPE1 --> T1
+    PIPE1 --> T2
+    PIPE1 --> TN
+
+    T1 --> Q1
+    T2 --> Q2
+    TN --> QN
+
+    %% Work stealing
+    Q1 -.->|steal| T2
+    Q2 -.->|steal| TN
+
+    %% Styling
+    classDef plan fill:#e3f2fd
+    classDef pipeline fill:#f3e5f5
+    classDef ops fill:#e8f5e9
+    classDef thread fill:#fff3e0
+    classDef queue fill:#fce4ec
+
+    class AGG,FILTER,SCAN plan
+    class PIPE1,PIPE2 pipeline
+    class SRC1,OP1,SINK1,SRC2,SINK2 ops
+    class T1,T2,TN thread
+    class Q1,Q2,QN queue

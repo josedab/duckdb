@@ -1,0 +1,93 @@
+%% DuckDB High-Level Architecture
+%% Commit: 52a07d06eafb63b60ed6275a494b85f93be4b986
+
+graph TB
+    subgraph "Client Layer"
+        CLI[CLI Shell]
+        CAPI[C API]
+        PY[Python API]
+        OTHER[Other Languages]
+    end
+
+    subgraph "Main Interface"
+        DB[DatabaseInstance]
+        CON[Connection]
+        CTX[ClientContext]
+    end
+
+    subgraph "Query Processing Pipeline"
+        PARSER[Parser<br/>libpg_query]
+        BINDER[Binder<br/>Semantic Analysis]
+        OPT[Optimizer<br/>12+ Passes]
+        PLANNER[Physical Planner]
+    end
+
+    subgraph "Execution Engine"
+        EXEC[Executor]
+        PIPE[Pipeline Engine]
+        PHYS[Physical Operators]
+        EXPR[Expression Executor]
+    end
+
+    subgraph "Data Management"
+        CAT[Catalog]
+        TXN[Transaction Manager]
+        STORE[Storage Manager]
+        BUF[Buffer Manager]
+    end
+
+    subgraph "Storage Layer"
+        DT[DataTable]
+        RG[RowGroups]
+        SEG[Column Segments]
+        COMP[Compression]
+    end
+
+    %% Client connections
+    CLI --> DB
+    CAPI --> DB
+    PY --> DB
+    OTHER --> DB
+
+    %% Main interface flow
+    DB --> CON
+    CON --> CTX
+
+    %% Query pipeline
+    CTX --> PARSER
+    PARSER --> BINDER
+    BINDER --> OPT
+    OPT --> PLANNER
+
+    %% Execution
+    PLANNER --> EXEC
+    EXEC --> PIPE
+    PIPE --> PHYS
+    PHYS --> EXPR
+
+    %% Data management connections
+    BINDER --> CAT
+    EXEC --> TXN
+    PHYS --> STORE
+    STORE --> BUF
+
+    %% Storage hierarchy
+    STORE --> DT
+    DT --> RG
+    RG --> SEG
+    SEG --> COMP
+
+    %% Styling
+    classDef client fill:#e1f5fe
+    classDef interface fill:#f3e5f5
+    classDef pipeline fill:#e8f5e9
+    classDef execution fill:#fff3e0
+    classDef data fill:#fce4ec
+    classDef storage fill:#f5f5f5
+
+    class CLI,CAPI,PY,OTHER client
+    class DB,CON,CTX interface
+    class PARSER,BINDER,OPT,PLANNER pipeline
+    class EXEC,PIPE,PHYS,EXPR execution
+    class CAT,TXN,STORE,BUF data
+    class DT,RG,SEG,COMP storage

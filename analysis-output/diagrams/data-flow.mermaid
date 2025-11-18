@@ -1,0 +1,44 @@
+%% DuckDB Query Data Flow
+%% Commit: 52a07d06eafb63b60ed6275a494b85f93be4b986
+
+sequenceDiagram
+    participant Client
+    participant Parser
+    participant Binder
+    participant Optimizer
+    participant Executor
+    participant Pipeline
+    participant Storage
+    participant Buffer
+
+    Client->>Parser: SQL Query
+    Note over Parser: libpg_query generates AST
+
+    Parser->>Binder: ParsedStatement
+    Note over Binder: Resolve names, check types
+
+    Binder->>Optimizer: LogicalPlan
+    Note over Optimizer: Apply optimization rules:<br/>1. Filter Pushdown<br/>2. Column Pruning<br/>3. Join Ordering<br/>4. Statistics Propagation
+
+    Optimizer->>Executor: OptimizedPlan
+    Note over Executor: Convert to physical plan
+
+    Executor->>Pipeline: Build Pipelines
+    Note over Pipeline: Identify parallelism opportunities
+
+    loop For each Pipeline
+        Pipeline->>Storage: Request Data
+        Storage->>Buffer: Pin Blocks
+
+        loop For each Morsel (2048 rows)
+            Buffer->>Pipeline: DataChunk
+            Note over Pipeline: Vectorized execution:<br/>Filter, Project, Join, Aggregate
+        end
+
+        Pipeline->>Executor: Results
+    end
+
+    Executor->>Client: QueryResult
+    Note over Client: Iterate over results
+
+    Note over Buffer: Unpin blocks (LRU eviction)

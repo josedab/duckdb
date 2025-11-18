@@ -1,0 +1,75 @@
+%% DuckDB Storage Hierarchy
+%% Commit: 52a07d06eafb63b60ed6275a494b85f93be4b986
+
+graph TB
+    subgraph "Table Structure"
+        TABLE[DataTable]
+    end
+
+    subgraph "Horizontal Partitioning"
+        RG1[RowGroup 1<br/>122,880 rows]
+        RG2[RowGroup 2<br/>122,880 rows]
+        RGN[RowGroup N<br/>≤122,880 rows]
+    end
+
+    subgraph "RowGroup 1 Columns"
+        COL1[Column 1]
+        COL2[Column 2]
+        COLN[Column N]
+    end
+
+    subgraph "Column Segments"
+        SEG1[Segment 1<br/>64KB compressed]
+        SEG2[Segment 2<br/>64KB compressed]
+    end
+
+    subgraph "Compression Types"
+        RLE[RLE]
+        DICT[Dictionary]
+        BIT[Bitpacking]
+        CONST[Constant]
+        UNCOMP[Uncompressed]
+    end
+
+    subgraph "Disk Blocks"
+        BLOCK1[Block 1<br/>256KB]
+        BLOCK2[Block 2<br/>256KB]
+    end
+
+    TABLE --> RG1
+    TABLE --> RG2
+    TABLE --> RGN
+
+    RG1 --> COL1
+    RG1 --> COL2
+    RG1 --> COLN
+
+    COL1 --> SEG1
+    COL1 --> SEG2
+
+    SEG1 --> RLE
+    SEG1 --> DICT
+    SEG1 --> BIT
+    SEG1 --> CONST
+    SEG1 --> UNCOMP
+
+    SEG1 --> BLOCK1
+    SEG2 --> BLOCK2
+
+    %% Statistics
+    RG1 -.-> STATS1[Min/Max Statistics<br/>Zone Maps]
+
+    %% Styling
+    classDef table fill:#e3f2fd
+    classDef rowgroup fill:#f3e5f5
+    classDef column fill:#e8f5e9
+    classDef segment fill:#fff3e0
+    classDef compression fill:#fce4ec
+    classDef block fill:#f5f5f5
+
+    class TABLE table
+    class RG1,RG2,RGN rowgroup
+    class COL1,COL2,COLN column
+    class SEG1,SEG2 segment
+    class RLE,DICT,BIT,CONST,UNCOMP compression
+    class BLOCK1,BLOCK2 block
