@@ -18,9 +18,15 @@
 
 ## Introduction
 
-DuckDB is designed for extensibility. Whether you need a custom function, new file format support, or specialized processing, the extension system provides clean interfaces to add functionality without modifying core code.
+One of DuckDB's greatest strengths is its extensibility. While the core engine handles SQL parsing, query optimization, and vectorized execution, much of the functionality that makes DuckDB useful—Parquet support, JSON functions, spatial operations—lives in extensions.
 
-Let's explore how to extend and integrate DuckDB.
+This isn't just about plugins. DuckDB is designed from the ground up to be embedded and extended. The same extension system that enables built-in features like Parquet support also enables you to add custom functions for your domain, integrate with proprietary file formats, or connect to external data sources.
+
+The extension architecture follows a clear philosophy: extensions should feel native. A function you add should be indistinguishable from a built-in function. It gets the same optimization treatment, the same error handling, the same documentation. This seamless integration is what makes DuckDB a practical platform for building analytical applications.
+
+In this post, we'll explore the extension architecture, walk through adding different types of functions, examine integration patterns for common use cases, and look at how to create your own extension from scratch.
+
+Let's start by understanding how extensions interact with DuckDB's core components.
 
 ---
 
@@ -53,9 +59,13 @@ graph TB
 
 ### Extension Types
 
-1. **Built-in**: Compiled into DuckDB (parquet, json)
-2. **Loadable**: Separate shared library (.duckdb_extension)
-3. **WebAssembly**: For browser environments
+DuckDB supports three types of extensions, each suited to different deployment scenarios:
+
+1. **Built-in Extensions**: Compiled directly into the DuckDB binary. These include parquet, json, and icu. They're always available, load instantly, and have no version compatibility concerns. The trade-off is binary size—each built-in extension increases the DuckDB library size.
+
+2. **Loadable Extensions**: Separate shared libraries (.duckdb_extension files) that are loaded at runtime with the `LOAD` command or automatically from the extension repository. This is the most flexible option—you can add functionality without recompiling DuckDB, and users can choose which extensions they need.
+
+3. **WebAssembly Extensions**: For browser environments where native shared libraries aren't available. These are compiled to WebAssembly and loaded by DuckDB-Wasm. They enable the same extension ecosystem in web applications.
 
 ### Extension Interface
 

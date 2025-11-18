@@ -18,7 +18,13 @@
 
 ## Introduction
 
-DuckDB's storage engine is designed for analytical workloads—optimizing for sequential scans and aggregations rather than point lookups. Let's explore how data is organized, compressed, and retrieved efficiently.
+The storage engine is where data lives between queries. Its design fundamentally shapes what operations are fast and what operations are slow. DuckDB's storage engine is designed specifically for analytical workloads—optimizing for sequential scans and aggregations rather than point lookups.
+
+Unlike traditional row-stores that optimize for transactional workloads (fast inserts, point updates, small reads), DuckDB's columnar storage optimizes for analytical patterns: reading few columns but many rows, compressing similar values together, and scanning data sequentially.
+
+The design also supports DuckDB's "instant-on" philosophy. There's no lengthy startup or recovery process—the database opens immediately and queries can begin. This is achieved through careful coordination between the buffer manager, write-ahead log, and checkpoint system.
+
+Let's explore how data is organized at each level of the storage hierarchy, how compression algorithms are selected automatically, and how transactions provide ACID guarantees without blocking readers.
 
 ---
 

@@ -18,9 +18,13 @@
 
 ## Introduction
 
-A codebase of 415,000 lines needs consistent patterns to remain maintainable. DuckDB achieves this through deliberate design choices—from classic patterns like Visitor and Factory to pragmatic approaches for error handling and testing.
+A codebase of 415,000 lines needs consistent patterns to remain maintainable. Without deliberate structure, codebases of this size become "big balls of mud"—difficult to understand, modify, or extend. DuckDB avoids this fate through thoughtful application of design patterns and consistent practices.
 
-Let's examine the patterns that make DuckDB's code both performant and maintainable.
+When you're reading DuckDB's code, you'll notice certain patterns appearing repeatedly. This isn't coincidence—it's intentional architecture. The same Visitor pattern that traverses ASTs also traverses logical plans and physical plans. The same Factory pattern that creates functions also creates operators and compression algorithms. This consistency means that once you understand one subsystem, you can transfer that knowledge to others.
+
+In this post, we'll examine the patterns that make DuckDB's code both performant and maintainable—patterns that have proven their worth over millions of lines of production code in databases like PostgreSQL, MySQL, and now DuckDB.
+
+Let's start with the design patterns, then move to error handling, memory management, and testing philosophy.
 
 ---
 
@@ -201,11 +205,13 @@ struct ParsedExpression {
 
 ## Memory Management
 
-DuckDB carefully manages memory for both performance and safety.
+Memory management in a database is critical—you're often working with datasets that approach or exceed available RAM. DuckDB carefully manages memory for both performance and safety, using a layered approach that provides fine-grained control while maintaining developer ergonomics.
+
+The memory system has multiple levels: smart pointers for ownership semantics, custom allocators for tracking and limits, a buffer manager for caching and spillover, and arena allocators for temporary data. Each level serves a specific purpose.
 
 ### Smart Pointers
 
-The codebase uses smart pointers consistently:
+The codebase uses smart pointers consistently, eliminating entire classes of memory bugs:
 
 ```cpp
 // Unique ownership (most common)
@@ -272,7 +278,9 @@ Arenas avoid allocation overhead for temporary query state.
 
 ## Testing Philosophy
 
-DuckDB has a comprehensive testing approach with 3,870+ test files.
+Testing is crucial for database correctness—a bug in query execution can silently corrupt results, leading to wrong business decisions downstream. DuckDB takes testing seriously with a comprehensive approach spanning 3,870+ test files, multiple testing frameworks, and continuous fuzzing.
+
+The philosophy is pragmatic: use the simplest testing approach that catches bugs effectively. For most SQL functionality, that means SQLLogicTest files—just SQL and expected results.
 
 ### SQLLogicTest
 

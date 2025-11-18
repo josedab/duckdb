@@ -18,7 +18,13 @@
 
 ## Introduction
 
-DuckDB achieves impressive analytical performance through careful engineering across multiple layers. In this final post, we'll examine the optimizer, parallelism model, and identify opportunities for further improvement.
+Performance in analytical databases isn't about any single optimization—it's about the compound effect of many optimizations working together. DuckDB achieves impressive analytical performance through careful engineering across multiple layers: the storage engine compresses data, the optimizer rewrites queries, the executor parallelizes work, and the vector engine processes batches efficiently.
+
+In the previous posts, we've explored each of these components individually. Now let's see how they work together, examine the query optimizer's transformation passes, understand the morsel-driven parallelism model, and learn how to profile and optimize your own queries.
+
+We'll also look at what DuckDB does well, where its current limitations are, and what improvements are on the horizon. By the end of this post, you'll understand not just how to use DuckDB effectively, but how to reason about its performance characteristics.
+
+This is the final post in our deep dive series. Let's make it count by covering the performance story end-to-end.
 
 ---
 

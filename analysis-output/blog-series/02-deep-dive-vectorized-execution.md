@@ -19,6 +19,10 @@
 
 In the previous post, we saw that DuckDB processes data in batches of 2,048 values. But why that specific number? And how does this batching translate to real performance gains?
 
+The answer lies in understanding how modern CPUs actually work. Modern processors are incredibly fast at arithmetic—they can perform billions of operations per second. But they're also incredibly bad at switching between tasks. Every time you call a function, branch on a condition, or access non-sequential memory, you pay a penalty that can be 10-100x more expensive than the actual computation.
+
+Vectorized execution is a technique that restructures query processing to play to CPU strengths while avoiding weaknesses. Instead of processing one row at a time (calling functions, branching, jumping around memory), we process entire arrays in tight loops that the CPU can optimize with prefetching, branch prediction, and SIMD instructions.
+
 Let's explore DuckDB's vectorized execution engine—the core innovation that enables analytical queries to run 5-50x faster than row-at-a-time processing.
 
 ---
@@ -403,7 +407,9 @@ Each step processes 2,048 values at a time, maintaining cache locality throughou
 
 ## Advanced: Compressed Execution
 
-DuckDB can execute some operations directly on compressed data:
+One of DuckDB's most powerful optimizations is executing operations directly on compressed data without decompression. This is possible because of the dictionary and constant vector types.
+
+### Dictionary-Encoded Execution
 
 ```cpp
 // Dictionary-encoded vector
@@ -416,7 +422,21 @@ idx_t dict_match = FindInDictionary(dictionary, "red");
 VectorOperations::Equals(indices, dict_match, sel);
 ```
 
-This avoids decompression entirely for filtering operations.
+This avoids decompression entirely for filtering operations. String comparison becomes integer comparison—orders of magnitude faster.
+
+### Constant Vector Optimization
+
+When you filter with a constant (e.g., `WHERE status = 'shipped'`), DuckDB represents `'shipped'` as a CONSTANT_VECTOR rather than repeating the value 2,048 times. Operations on constant vectors can often be reduced to a single operation:
+
+```cpp
+// a + 5 where 5 is constant
+// Instead of adding 5 to each element individually:
+// Just store the constant and apply it during result materialization
+```
+
+### Late Materialization
+
+DuckDB delays converting to flat vectors as long as possible. A query might flow through multiple operators with data still dictionary-encoded, only materializing at the final output. This keeps memory bandwidth low and operations fast throughout the pipeline.
 
 ---
 
